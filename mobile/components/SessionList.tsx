@@ -1,4 +1,4 @@
-import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 
 export interface SessionInfo {
   id: string;
@@ -8,6 +8,7 @@ export interface SessionInfo {
   status: 'running' | 'exited' | 'waiting-input';
   exitCode?: number;
   createdAt: string;
+  lastLine?: string;
 }
 
 interface Props {
@@ -16,11 +17,16 @@ interface Props {
   onDelete: (id: string) => void;
 }
 
-const STATUS_COLORS = {
+const STATUS_COLORS: Record<string, string> = {
   running: '#2ea043',
   'waiting-input': '#d29922',
   exited: '#484f58',
 };
+
+function cleanLastLine(line: string): string {
+  // Strip ANSI escape codes for display
+  return line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim().slice(-80);
+}
 
 export function SessionList({ sessions, onSelect, onDelete }: Props) {
   return (
@@ -30,10 +36,12 @@ export function SessionList({ sessions, onSelect, onDelete }: Props) {
       contentContainerStyle={styles.list}
       renderItem={({ item }) => (
         <TouchableOpacity style={styles.item} onPress={() => onSelect(item.id)}>
-          <View style={[styles.dot, { backgroundColor: STATUS_COLORS[item.status] }]} />
+          <View style={[styles.dot, { backgroundColor: STATUS_COLORS[item.status] || '#484f58' }]} />
           <View style={styles.info}>
             <Text style={styles.name}>{item.name}</Text>
-            <Text style={styles.status}>{item.status}</Text>
+            <Text style={styles.lastLine} numberOfLines={1}>
+              {item.lastLine ? cleanLastLine(item.lastLine) : `${item.command} ${item.args.join(' ')}`.trim()}
+            </Text>
           </View>
           <TouchableOpacity style={styles.deleteBtn} onPress={() => onDelete(item.id)}>
             <Text style={styles.deleteText}>×</Text>
@@ -59,7 +67,10 @@ const styles = StyleSheet.create({
   dot: { width: 10, height: 10, borderRadius: 5 },
   info: { flex: 1 },
   name: { color: '#c9d1d9', fontSize: 15, fontWeight: '500' },
-  status: { color: '#8b949e', fontSize: 12, marginTop: 2 },
+  lastLine: {
+    color: '#8b949e', fontSize: 11, marginTop: 3,
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+  },
   deleteBtn: { padding: 4 },
   deleteText: { color: '#8b949e', fontSize: 20 },
   empty: { alignItems: 'center', paddingTop: 60 },

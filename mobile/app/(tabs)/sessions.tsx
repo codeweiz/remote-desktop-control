@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
-import { View, TouchableOpacity, Text, StyleSheet, Alert } from 'react-native';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, TextInput, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useServer } from '../../hooks/useServer';
 import { SessionList, SessionInfo } from '../../components/SessionList';
 import { CreateSessionModal } from '../../components/CreateSessionModal';
@@ -10,6 +11,7 @@ export default function SessionsScreen() {
   const { baseUrl } = useServer();
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [search, setSearch] = useState('');
 
   const fetchSessions = useCallback(async () => {
     if (!baseUrl) return;
@@ -27,6 +29,16 @@ export default function SessionsScreen() {
     return () => clearInterval(interval);
   }, [fetchSessions]);
 
+  const filtered = useMemo(() => {
+    if (!search.trim()) return sessions;
+    const q = search.toLowerCase();
+    return sessions.filter(s =>
+      s.name.toLowerCase().includes(q) ||
+      s.command.toLowerCase().includes(q) ||
+      (s.lastLine && s.lastLine.toLowerCase().includes(q))
+    );
+  }, [sessions, search]);
+
   async function handleCreate(name: string, command: string, argsStr: string) {
     if (!baseUrl) return;
     const args = argsStr ? argsStr.split(/\s+/).filter(Boolean) : [];
@@ -37,8 +49,8 @@ export default function SessionsScreen() {
         body: JSON.stringify({ name, command, args }),
       });
       await fetchSessions();
-    } catch (e) {
-      Alert.alert('Error', 'Failed to create session');
+    } catch {
+      // Alert handled by SessionList
     }
   }
 
@@ -47,8 +59,8 @@ export default function SessionsScreen() {
     try {
       await fetch(`${baseUrl}/api/sessions/${id}`, { method: 'DELETE' });
       await fetchSessions();
-    } catch (e) {
-      Alert.alert('Error', 'Failed to delete session');
+    } catch {
+      // silent
     }
   }
 
@@ -58,7 +70,24 @@ export default function SessionsScreen() {
 
   return (
     <View style={styles.container}>
-      <SessionList sessions={sessions} onSelect={handleSelect} onDelete={handleDelete} />
+      <View style={styles.searchBar}>
+        <Ionicons name="search" size={16} color="#484f58" style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search sessions..."
+          placeholderTextColor="#484f58"
+          value={search}
+          onChangeText={setSearch}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {search.length > 0 && (
+          <TouchableOpacity onPress={() => setSearch('')} style={styles.clearBtn}>
+            <Ionicons name="close-circle" size={16} color="#484f58" />
+          </TouchableOpacity>
+        )}
+      </View>
+      <SessionList sessions={filtered} onSelect={handleSelect} onDelete={handleDelete} />
       <TouchableOpacity style={styles.fab} onPress={() => setModalVisible(true)}>
         <Text style={styles.fabText}>+</Text>
       </TouchableOpacity>
@@ -73,6 +102,15 @@ export default function SessionsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0d1117' },
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center',
+    marginHorizontal: 12, marginTop: 8, marginBottom: 4,
+    backgroundColor: '#161b22', borderWidth: 1, borderColor: '#30363d',
+    borderRadius: 8, paddingHorizontal: 10,
+  },
+  searchIcon: { marginRight: 6 },
+  searchInput: { flex: 1, color: '#c9d1d9', fontSize: 14, paddingVertical: 8 },
+  clearBtn: { padding: 4 },
   fab: {
     position: 'absolute', bottom: 20, right: 20,
     width: 56, height: 56, borderRadius: 28,

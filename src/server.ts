@@ -137,9 +137,13 @@ export async function startServer(config: ServerConfig): Promise<void> {
       res.end(JSON.stringify(data));
     };
 
-    // API: list sessions
+    // API: list sessions (include lastLine from PTY buffer)
     if (url.pathname === '/api/sessions' && req.method === 'GET') {
-      return jsonResponse(200, sessionManager.list());
+      const sessions = sessionManager.list().map(s => ({
+        ...s,
+        lastLine: sessionManager.getPty(s.id)?.getLastLine() || '',
+      }));
+      return jsonResponse(200, sessions);
     }
 
     // API: create session

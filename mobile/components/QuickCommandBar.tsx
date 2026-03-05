@@ -1,8 +1,9 @@
-import { ScrollView, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { ScrollView, TouchableOpacity, Text, StyleSheet, Platform } from 'react-native';
 
 const COMMANDS = [
   { label: 'yes', command: 'yes\n', color: '#2ea043' },
   { label: 'no', command: 'no\n', color: '#da3633' },
+  { label: 'ESC', command: '\x1b', color: '#d29922' },
   { label: 'Ctrl+C', command: '\x03', color: '#d29922' },
   { label: 'Ctrl+D', command: '\x04', color: '#d29922' },
   { label: 'Enter', command: '\r', color: '#58a6ff' },
@@ -34,5 +35,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6,
     backgroundColor: '#21262d', borderWidth: 1,
   },
-  btnText: { fontSize: 12, fontFamily: 'Menlo' },
+  btnText: { fontSize: 12, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }) },
 });

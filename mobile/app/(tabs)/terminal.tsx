@@ -2,11 +2,15 @@ import { useRef, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
 import { useServer } from '../../hooks/useServer';
+import { useTerminalSettings, THEME_COLORS } from '../../hooks/useTerminalSettings';
 import { QuickCommandBar } from '../../components/QuickCommandBar';
 
-const TERMINAL_HTML = `<!DOCTYPE html>
+function buildTerminalHtml(fontSize: number, theme: string) {
+  const colors = THEME_COLORS[theme] || THEME_COLORS.dark;
+  return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8"/>
@@ -14,7 +18,7 @@ const TERMINAL_HTML = `<!DOCTYPE html>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.css"/>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
-  html,body{height:100%;overflow:hidden;background:#1e1e1e;}
+  html,body{height:100%;overflow:hidden;background:${colors.background};}
   #terminal{width:100%;height:100%;}
 </style>
 </head>
@@ -25,9 +29,9 @@ import {Terminal} from 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5/+esm';
 import {FitAddon} from 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/+esm';
 
 const term = new Terminal({
-  cursorBlink: true, fontSize: 13,
+  cursorBlink: true, fontSize: ${fontSize},
   fontFamily: '"SF Mono",Menlo,Monaco,monospace',
-  theme: { background:'#1e1e1e', foreground:'#d4d4d4', cursor:'#58a6ff' },
+  theme: { background:'${colors.background}', foreground:'${colors.foreground}', cursor:'${colors.cursor}' },
   allowProposedApi: true,
 });
 const fitAddon = new FitAddon();
@@ -37,7 +41,6 @@ fitAddon.fit();
 
 let ws = null;
 
-// Receive messages from React Native
 window.addEventListener('message', (e) => {
   try {
     const msg = JSON.parse(e.data);
@@ -91,10 +94,13 @@ term.onResize(({cols, rows}) => {
 <\/script>
 </body>
 </html>`;
+}
 
 export default function TerminalScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
   const { wsUrl, baseUrl, config } = useServer();
+  const { settings } = useTerminalSettings();
+  const insets = useSafeAreaInsets();
   const webViewRef = useRef<WebView>(null);
 
   const sendToWebView = useCallback((msg: object) => {
@@ -123,17 +129,17 @@ export default function TerminalScreen() {
 
   if (!sessionId) {
     return (
-      <View style={styles.placeholder}>
+      <View style={[styles.placeholder, { paddingTop: insets.top }]}>
         <Text style={styles.placeholderText}>Select a session to connect</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <WebView
         ref={webViewRef}
-        source={{ html: TERMINAL_HTML, baseUrl: 'https://cdn.jsdelivr.net' }}
+        source={{ html: buildTerminalHtml(settings.fontSize, settings.theme), baseUrl: 'https://cdn.jsdelivr.net' }}
         style={styles.webview}
         javaScriptEnabled
         originWhitelist={['*']}
