@@ -1,16 +1,15 @@
-import { useRef, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { useRef, useEffect, useCallback, useState } from 'react';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useServer } from '../../hooks/useServer';
-import { useTerminalSettings, THEME_COLORS } from '../../hooks/useTerminalSettings';
+import { THEME_COLORS } from '../../hooks/useTerminalSettings';
 import { QuickCommandBar } from '../../components/QuickCommandBar';
 
-function buildTerminalHtml(fontSize: number, theme: string) {
-  const colors = THEME_COLORS[theme] || THEME_COLORS.dark;
-  return `<!DOCTYPE html>
+const TERMINAL_HTML = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8"/>
@@ -18,7 +17,7 @@ function buildTerminalHtml(fontSize: number, theme: string) {
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.css"/>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
-  html,body{height:100%;overflow:hidden;background:${colors.background};}
+  html,body{height:100%;overflow:hidden;background:#1e1e1e;}
   #terminal{width:100%;height:100%;}
 </style>
 </head>
@@ -29,15 +28,23 @@ import {Terminal} from 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5/+esm';
 import {FitAddon} from 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/+esm';
 
 const term = new Terminal({
-  cursorBlink: true, fontSize: ${fontSize},
+  cursorBlink: true, fontSize: 14,
   fontFamily: '"SF Mono",Menlo,Monaco,monospace',
-  theme: { background:'${colors.background}', foreground:'${colors.foreground}', cursor:'${colors.cursor}' },
+  theme: { background:'#1e1e1e', foreground:'#d4d4d4', cursor:'#58a6ff' },
   allowProposedApi: true,
 });
 const fitAddon = new FitAddon();
 term.loadAddon(fitAddon);
 term.open(document.getElementById('terminal'));
 fitAddon.fit();
+
+// Focus terminal textarea on tap so keyboard appears
+document.getElementById('terminal').addEventListener('click', () => {
+  const textarea = document.querySelector('.xterm-helper-textarea');
+  if (textarea) {
+    textarea.focus();
+  }
+});
 
 let ws = null;
 
@@ -52,6 +59,20 @@ window.addEventListener('message', (e) => {
       }
     } else if (msg.type === 'buffer') {
       if (msg.data) term.write(msg.data);
+    } else if (msg.type === 'settings') {
+      if (msg.fontSize) term.options.fontSize = msg.fontSize;
+      if (msg.theme) {
+        term.options.theme = { ...term.options.theme, ...msg.theme };
+        document.body.style.background = msg.theme.background || '#1e1e1e';
+      }
+      fitAddon.fit();
+      // Report new size after settings change
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      }
+    } else if (msg.type === 'focus') {
+      const textarea = document.querySelector('.xterm-helper-textarea');
+      if (textarea) textarea.focus();
     }
   } catch {}
 });
@@ -94,14 +115,26 @@ term.onResize(({cols, rows}) => {
 <\/script>
 </body>
 </html>`;
+
+async function loadSettings() {
+  try {
+    const raw = await AsyncStorage.getItem('rtb-terminal-settings');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.fontSize === 'number' && THEME_COLORS[parsed.theme]) {
+        return parsed;
+      }
+    }
+  } catch {}
+  return { fontSize: 14, theme: 'dark' };
 }
 
 export default function TerminalScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
   const { wsUrl, baseUrl, config } = useServer();
-  const { settings } = useTerminalSettings();
   const insets = useSafeAreaInsets();
   const webViewRef = useRef<WebView>(null);
+  const [webViewReady, setWebViewReady] = useState(false);
 
   const sendToWebView = useCallback((msg: object) => {
     webViewRef.current?.injectJavaScript(
@@ -109,19 +142,36 @@ export default function TerminalScreen() {
     );
   }, []);
 
+  // Apply settings from AsyncStorage whenever terminal tab gains focus
+  useFocusEffect(
+    useCallback(() => {
+      if (!webViewReady) return;
+      loadSettings().then((s) => {
+        const colors = THEME_COLORS[s.theme] || THEME_COLORS.dark;
+        sendToWebView({ type: 'settings', fontSize: s.fontSize, theme: colors });
+      });
+    }, [webViewReady, sendToWebView])
+  );
+
   useEffect(() => {
-    if (sessionId && wsUrl && config) {
+    if (sessionId && wsUrl && config && webViewReady) {
       const timer = setTimeout(async () => {
+        // Apply saved settings first
+        const s = await loadSettings();
+        const colors = THEME_COLORS[s.theme] || THEME_COLORS.dark;
+        sendToWebView({ type: 'settings', fontSize: s.fontSize, theme: colors });
+
+        // Then fetch buffer and connect
         try {
           const res = await fetch(`${baseUrl}/api/sessions/buffer?id=${sessionId}`);
           const { buffer } = await res.json();
           if (buffer) sendToWebView({ type: 'buffer', data: buffer });
         } catch {}
         sendToWebView({ type: 'connect', wsUrl, sessionId, token: config.token });
-      }, 1000);
+      }, 500);
       return () => clearTimeout(timer);
     }
-  }, [sessionId, wsUrl, config, baseUrl, sendToWebView]);
+  }, [sessionId, wsUrl, config, baseUrl, sendToWebView, webViewReady]);
 
   function handleCommand(command: string) {
     sendToWebView({ type: 'input', data: command });
@@ -139,12 +189,14 @@ export default function TerminalScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <WebView
         ref={webViewRef}
-        source={{ html: buildTerminalHtml(settings.fontSize, settings.theme), baseUrl: 'https://cdn.jsdelivr.net' }}
+        source={{ html: TERMINAL_HTML, baseUrl: 'https://cdn.jsdelivr.net' }}
         style={styles.webview}
         javaScriptEnabled
         originWhitelist={['*']}
         allowsInlineMediaPlayback
         mixedContentMode="always"
+        keyboardDisplayRequiresUserAction={false}
+        onLoad={() => setWebViewReady(true)}
         onMessage={(event) => {
           try {
             const msg = JSON.parse(event.nativeEvent.data);
