@@ -28,18 +28,19 @@ export default function TerminalScreen() {
   }, []);
 
   useEffect(() => {
-    if (sessionId && wsUrl && config) {
-      // Fetch buffer first, then connect
-      (async () => {
+    if (sessionId && wsUrl && config && htmlUri) {
+      // Small delay to let WebView load the HTML before injecting
+      const timer = setTimeout(async () => {
         try {
           const res = await fetch(`${baseUrl}/api/sessions/buffer?id=${sessionId}`);
           const { buffer } = await res.json();
           if (buffer) sendToWebView({ type: 'buffer', data: buffer });
         } catch {}
         sendToWebView({ type: 'connect', wsUrl, sessionId, token: config.token });
-      })();
+      }, 500);
+      return () => clearTimeout(timer);
     }
-  }, [sessionId, wsUrl, config, baseUrl, sendToWebView]);
+  }, [sessionId, wsUrl, config, baseUrl, sendToWebView, htmlUri]);
 
   function handleCommand(command: string) {
     sendToWebView({ type: 'input', data: command });
