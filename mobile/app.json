@@ -32,7 +32,13 @@
     },
     "plugins": [
       "expo-notifications",
-      "expo-router"
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow RTB to use camera for QR code scanning"
+        }
+      ]
     ]
   }
 }
