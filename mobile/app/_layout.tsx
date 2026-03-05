@@ -1,6 +1,9 @@
 import { useEffect } from 'react';
+import { LogBox } from 'react-native';
 import { Stack } from 'expo-router';
 import * as Notifications from 'expo-notifications';
+
+LogBox.ignoreLogs(['expo-notifications']);
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
