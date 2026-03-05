@@ -35,6 +35,37 @@
 | `web/index.html` | Web 终端面板（单文件 SPA） |
 | `mobile/` | Expo React Native 移动端 App |
 
+## 安装
+
+### 下载预编译二进制
+
+从 [GitHub Releases](https://github.com/codeweiz/remote-desktop-control/releases) 下载对应平台的二进制文件：
+
+```bash
+# macOS (Apple Silicon)
+curl -fsSL https://github.com/codeweiz/remote-desktop-control/releases/latest/download/rtb-darwin-arm64.tar.gz | tar xz
+./rtb start
+
+# macOS (Intel)
+curl -fsSL https://github.com/codeweiz/remote-desktop-control/releases/latest/download/rtb-darwin-x64.tar.gz | tar xz
+./rtb start
+
+# Linux (x64)
+curl -fsSL https://github.com/codeweiz/remote-desktop-control/releases/latest/download/rtb-linux-x64.tar.gz | tar xz
+./rtb start
+
+# Linux (ARM64)
+curl -fsSL https://github.com/codeweiz/remote-desktop-control/releases/latest/download/rtb-linux-arm64.tar.gz | tar xz
+./rtb start
+```
+
+### 从源码构建
+
+```bash
+make install
+make start
+```
+
 ## 快速开始
 
 ```bash
@@ -50,6 +81,8 @@ make start
 
 启动后访问终端输出的 URL（含 token），如：`http://localhost:3000?token=xxx`
 
+服务器启动时会在终端显示 QR Code，Mobile App 扫码即可自动连接。
+
 ## 所有命令
 
 运行 `make help` 查看所有可用命令：
@@ -57,6 +90,7 @@ make start
 ```
   install                Install server dependencies
   build                  Build TypeScript to dist/
+  build-binary           Build standalone binary for current platform
   dev                    Start server in dev mode (tsx, auto-reload)
   start                  Build and start the server
   start-tunnel           Build and start with Cloudflare Tunnel
@@ -135,7 +169,7 @@ rtb tunnel setup <name> <hostname>
 
 ## 移动端
 
-基于 Expo (React Native) 的移动终端客户端：
+基于 Expo (React Native) 的移动终端客户端。支持扫码连接：服务器启动后终端会显示 QR Code，在 App 连接页点击 "Scan QR Code" 扫码即可自动连接。
 
 ```bash
 # 安装依赖
