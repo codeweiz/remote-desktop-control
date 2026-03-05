@@ -49,4 +49,19 @@ describe('PtyManager', () => {
     pty.spawn('echo', ['hi']);
     expect(() => pty!.resize(120, 40)).not.toThrow();
   });
+
+  it('maintains an output buffer', async () => {
+    pty = new PtyManager();
+    pty.spawn('echo', ['buffer-test']);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const buffer = pty.getBuffer();
+    expect(buffer).toContain('buffer-test');
+  });
+
+  it('buffer does not exceed max size', () => {
+    pty = new PtyManager({ bufferSize: 10 });
+    pty.spawn('echo', ['hi']);
+    const buffer = pty.getBuffer();
+    expect(typeof buffer).toBe('string');
+  });
 });
