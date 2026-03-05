@@ -1,0 +1,13 @@
+{
+  "preset": [
+    { "label": "yes", "command": "yes\n", "color": "#2ea043" },
+    { "label": "no", "command": "no\n", "color": "#da3633" },
+    { "label": "Ctrl+C", "command": "\u0003", "color": "#d29922" },
+    { "label": "Ctrl+D", "command": "\u0004", "color": "#d29922" },
+    { "label": "Enter", "command": "\r", "color": "#666" },
+    { "label": "/compact", "command": "/compact\n", "color": "#8b5cf6" },
+    { "label": "/clear", "command": "/clear\n", "color": "#8b5cf6" },
+    { "label": "/help", "command": "/help\n", "color": "#8b5cf6" }
+  ],
+  "custom": []
+}
