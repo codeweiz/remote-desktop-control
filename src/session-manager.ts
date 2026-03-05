@@ -59,7 +59,13 @@ export class SessionManager {
       detector.processExited(code);
     });
 
-    pty.spawn(command, args, cols, rows);
+    // Build the full command string for shell-wrapping
+    const fullCommand = args.length > 0
+      ? `${command} ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`
+      : command;
+
+    // Spawn shell and write command into it
+    pty.spawn(command, args, cols, rows, fullCommand);
     return this.toInfo(session);
   }
 

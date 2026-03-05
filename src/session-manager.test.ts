@@ -40,11 +40,20 @@ describe('SessionManager', () => {
     expect(manager.get(session.id)).toBeUndefined();
   });
 
-  it('session updates status to exited', async () => {
+  it('session runs inside a shell (stays running after command completes)', async () => {
     manager = new SessionManager();
-    const session = manager.create('will-exit', 'echo', ['done']);
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    const session = manager.create('shell-test', 'echo', ['hello-from-shell']);
+    const pty = manager.getPty(session.id)!;
+
+    // Wait for command to execute inside the shell
+    const output: string[] = [];
+    pty.onData((data) => output.push(data));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    const allOutput = output.join('');
+    // The shell should still be running even after echo completes
     const updated = manager.get(session.id);
-    expect(updated?.status).toBe('exited');
+    expect(updated?.status).toBe('running');
+    expect(allOutput).toContain('hello-from-shell');
   });
 });
