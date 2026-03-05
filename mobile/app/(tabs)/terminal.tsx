@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useLocalSearchParams } from 'expo-router';
 import { Asset } from 'expo-asset';
+import * as Notifications from 'expo-notifications';
 import { useServer } from '../../hooks/useServer';
 import { QuickCommandBar } from '../../components/QuickCommandBar';
 
@@ -64,8 +65,15 @@ export default function TerminalScreen() {
           onMessage={(event) => {
             try {
               const msg = JSON.parse(event.nativeEvent.data);
-              // Handle messages from WebView (notifications handled in Task 8)
-              void msg;
+              if (msg.type === 'notification') {
+                Notifications.scheduleNotificationAsync({
+                  content: {
+                    title: 'RTB',
+                    body: msg.message || 'Terminal needs attention',
+                  },
+                  trigger: null,
+                });
+              }
             } catch {}
           }}
         />
