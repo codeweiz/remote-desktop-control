@@ -13,6 +13,7 @@
     "@react-navigation/bottom-tabs": "^7.15.5",
     "@react-navigation/native": "^7.1.33",
     "expo": "~55.0.4",
+    "expo-asset": "~55.0.8",
     "expo-constants": "~55.0.7",
     "expo-linking": "~55.0.7",
     "expo-notifications": "~55.0.10",
