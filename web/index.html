@@ -3,91 +3,757 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Remote Terminal</title>
+  <title>RTB v2 — Remote Terminal Bridge</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.css" />
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { height: 100%; background: #1e1e1e; overflow: hidden; }
-    #terminal { height: 100%; width: 100%; }
-    #status {
-      position: fixed; top: 8px; right: 8px; z-index: 10;
-      padding: 4px 10px; border-radius: 4px; font-size: 12px;
-      font-family: monospace; color: #fff;
+    /* ── Reset & Base ──────────────────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      height: 100%; overflow: hidden;
+      background: #0d1117; color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     }
-    .connected { background: #2ea043; }
-    .disconnected { background: #da3633; }
-    .connecting { background: #d29922; }
+
+    /* ── Grid Layout ───────────────────────────────────────────── */
+    #app {
+      display: grid;
+      grid-template-rows: 48px 1fr 48px;
+      grid-template-columns: 240px 1fr;
+      grid-template-areas:
+        "topbar   topbar"
+        "sidebar  terminal"
+        "cmdbar   cmdbar";
+      height: 100vh;
+      width: 100vw;
+    }
+
+    /* ── Top Bar ───────────────────────────────────────────────── */
+    #topbar {
+      grid-area: topbar;
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 16px;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      z-index: 100;
+    }
+    #hamburger {
+      display: none; background: none; border: none; color: #c9d1d9;
+      font-size: 20px; cursor: pointer; padding: 4px 8px; border-radius: 6px;
+    }
+    #hamburger:hover { background: #21262d; }
+    .topbar-title {
+      font-size: 15px; font-weight: 700; color: #f0f6fc; letter-spacing: 0.3px;
+      white-space: nowrap;
+    }
+    .topbar-spacer { flex: 1; }
+    #connection-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; font-family: "SF Mono", "Menlo", monospace;
+      padding: 3px 10px; border-radius: 12px;
+    }
+    #connection-badge .dot {
+      width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+    }
+    #connection-badge.connected { background: rgba(46,160,67,.15); color: #3fb950; }
+    #connection-badge.connected .dot { background: #2ea043; }
+    #connection-badge.disconnected { background: rgba(218,54,51,.15); color: #f85149; }
+    #connection-badge.disconnected .dot { background: #da3633; }
+    #connection-badge.connecting { background: rgba(210,153,34,.15); color: #d29922; }
+    #connection-badge.connecting .dot { background: #d29922; }
+
+    .topbar-icon {
+      background: none; border: none; color: #8b949e; font-size: 18px;
+      cursor: pointer; padding: 6px 8px; border-radius: 6px; position: relative;
+    }
+    .topbar-icon:hover { background: #21262d; color: #c9d1d9; }
+
+    /* ── Notification Dropdown ─────────────────────────────────── */
+    #notif-dropdown {
+      display: none; position: absolute; top: 44px; right: 8px;
+      background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+      padding: 16px; width: 260px; z-index: 200;
+      box-shadow: 0 8px 24px rgba(0,0,0,.4);
+    }
+    #notif-dropdown.open { display: block; }
+    #notif-dropdown h4 {
+      font-size: 13px; color: #8b949e; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-bottom: 12px;
+    }
+    .notif-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0;
+    }
+    .notif-row + .notif-row { border-top: 1px solid #21262d; }
+    .notif-label { font-size: 14px; color: #c9d1d9; }
+    /* Toggle switch */
+    .toggle {
+      position: relative; width: 40px; height: 22px; cursor: pointer;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute; inset: 0; background: #30363d;
+      border-radius: 11px; transition: background .2s;
+    }
+    .toggle .slider::before {
+      content: ''; position: absolute; width: 16px; height: 16px;
+      left: 3px; top: 3px; background: #c9d1d9; border-radius: 50%;
+      transition: transform .2s;
+    }
+    .toggle input:checked + .slider { background: #2ea043; }
+    .toggle input:checked + .slider::before { transform: translateX(18px); }
+
+    /* ── Sidebar ───────────────────────────────────────────────── */
+    #sidebar {
+      grid-area: sidebar;
+      background: #161b22;
+      border-right: 1px solid #30363d;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      transition: transform .25s ease;
+    }
+    .sidebar-header {
+      padding: 12px 16px; font-size: 11px; font-weight: 600;
+      color: #8b949e; text-transform: uppercase; letter-spacing: 0.8px;
+    }
+    #session-list {
+      flex: 1; overflow-y: auto; padding: 0 8px;
+    }
+    #session-list::-webkit-scrollbar { width: 4px; }
+    #session-list::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
+
+    .session-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; margin: 2px 0; border-radius: 8px;
+      cursor: pointer; font-size: 13px; color: #c9d1d9;
+      transition: background .15s;
+      user-select: none;
+    }
+    .session-item:hover { background: #21262d; }
+    .session-item.active { background: #1f6feb22; color: #58a6ff; }
+    .session-status {
+      flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%;
+    }
+    .session-status.running { background: #2ea043; }
+    .session-status.waiting-input { background: #d29922; animation: pulse-dot 1.5s infinite; }
+    .session-status.exited { background: #484f58; }
+    .session-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-delete {
+      opacity: 0; background: none; border: none; color: #8b949e;
+      font-size: 14px; cursor: pointer; padding: 2px 4px; border-radius: 4px;
+    }
+    .session-item:hover .session-delete { opacity: 1; }
+    .session-delete:hover { color: #f85149; background: rgba(248,81,73,.1); }
+
+    #add-session-btn {
+      margin: 8px; padding: 8px 0; border: 1px dashed #30363d;
+      border-radius: 8px; background: none; color: #8b949e;
+      font-size: 13px; cursor: pointer; transition: all .15s;
+    }
+    #add-session-btn:hover { border-color: #58a6ff; color: #58a6ff; background: #1f6feb11; }
+
+    /* ── Terminal Area ──────────────────────────────────────────── */
+    #terminal-area {
+      grid-area: terminal;
+      background: #1e1e1e;
+      padding: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+    #terminal-container {
+      width: 100%; height: 100%;
+    }
+    #no-session-placeholder {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      height: 100%; color: #484f58; gap: 16px;
+    }
+    #no-session-placeholder .icon { font-size: 48px; opacity: .5; }
+    #no-session-placeholder p { font-size: 14px; }
+
+    /* ── Command Bar ───────────────────────────────────────────── */
+    #cmdbar {
+      grid-area: cmdbar;
+      background: #161b22;
+      border-top: 1px solid #30363d;
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 12px;
+      overflow-x: auto;
+    }
+    #cmdbar::-webkit-scrollbar { height: 0; }
+    .cmd-btn {
+      flex-shrink: 0; padding: 5px 14px; border-radius: 6px;
+      border: 1px solid transparent; background: #21262d;
+      color: #c9d1d9; font-size: 12px; font-family: "SF Mono", "Menlo", monospace;
+      cursor: pointer; transition: all .15s; white-space: nowrap;
+    }
+    .cmd-btn:hover { filter: brightness(1.2); }
+    .cmd-btn.highlight {
+      animation: pulse-btn 1s infinite alternate;
+    }
+
+    /* ── Modal ─────────────────────────────────────────────────── */
+    #modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.6); z-index: 500;
+      align-items: center; justify-content: center;
+    }
+    #modal-overlay.open { display: flex; }
+    #modal-content {
+      background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+      padding: 24px; width: 380px; max-width: 90vw;
+      box-shadow: 0 16px 48px rgba(0,0,0,.5);
+    }
+    #modal-content h3 {
+      font-size: 16px; color: #f0f6fc; margin-bottom: 20px;
+    }
+    .form-group { margin-bottom: 14px; }
+    .form-group label {
+      display: block; font-size: 12px; color: #8b949e;
+      margin-bottom: 6px; font-weight: 500;
+    }
+    .form-group input {
+      width: 100%; padding: 8px 12px; border-radius: 6px;
+      border: 1px solid #30363d; background: #0d1117; color: #c9d1d9;
+      font-size: 14px; outline: none;
+    }
+    .form-group input:focus { border-color: #58a6ff; }
+    .form-actions {
+      display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px;
+    }
+    .btn {
+      padding: 7px 16px; border-radius: 6px; border: none;
+      font-size: 13px; cursor: pointer; font-weight: 500; transition: filter .15s;
+    }
+    .btn:hover { filter: brightness(1.15); }
+    .btn-primary { background: #238636; color: #fff; }
+    .btn-secondary { background: #21262d; color: #c9d1d9; }
+
+    /* ── Sidebar overlay for mobile ────────────────────────────── */
+    #sidebar-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4);
+      z-index: 49;
+    }
+
+    /* ── Animations ────────────────────────────────────────────── */
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .4; }
+    }
+    @keyframes pulse-btn {
+      from { box-shadow: 0 0 0 0 rgba(46,160,67,.4); }
+      to   { box-shadow: 0 0 0 6px rgba(46,160,67,0); }
+    }
+
+    /* ── Mobile Responsive ─────────────────────────────────────── */
+    @media (max-width: 768px) {
+      #app {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "topbar"
+          "terminal"
+          "cmdbar";
+      }
+      #hamburger { display: block; }
+      #sidebar {
+        position: fixed; top: 48px; left: 0; bottom: 0; width: 260px;
+        z-index: 50;
+        transform: translateX(-100%);
+      }
+      #sidebar.open { transform: translateX(0); }
+      #sidebar-overlay.open { display: block; }
+    }
   </style>
 </head>
 <body>
-  <div id="status" class="connecting">connecting...</div>
-  <div id="terminal"></div>
 
-  <script type="module">
-    import { Terminal } from 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5/+esm';
-    import { FitAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/+esm';
-    import { WebLinksAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0/+esm';
+<div id="app">
+  <!-- ── Top Bar ────────────────────────────────────────────── -->
+  <header id="topbar">
+    <button id="hamburger" aria-label="Toggle sidebar">&#9776;</button>
+    <span class="topbar-title">RTB v2</span>
+    <span class="topbar-spacer"></span>
+    <span id="connection-badge" class="connecting">
+      <span class="dot"></span>
+      <span id="connection-text">connecting</span>
+    </span>
+    <button class="topbar-icon" id="bell-btn" aria-label="Notifications">&#128276;</button>
+    <button class="topbar-icon" id="gear-btn" aria-label="Settings">&#9881;</button>
 
-    const params = new URLSearchParams(location.search);
-    const token = params.get('token');
-    const statusEl = document.getElementById('status');
+    <!-- Notification Dropdown -->
+    <div id="notif-dropdown">
+      <h4>Notifications</h4>
+      <div class="notif-row">
+        <span class="notif-label">Browser</span>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-browser" />
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="notif-row">
+        <span class="notif-label">Feishu</span>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-feishu" />
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+  </header>
 
-    const term = new Terminal({
+  <!-- ── Sidebar ────────────────────────────────────────────── -->
+  <aside id="sidebar">
+    <div class="sidebar-header">Sessions</div>
+    <div id="session-list"></div>
+    <button id="add-session-btn">+ New Session</button>
+  </aside>
+  <div id="sidebar-overlay"></div>
+
+  <!-- ── Terminal ───────────────────────────────────────────── -->
+  <main id="terminal-area">
+    <div id="no-session-placeholder">
+      <div class="icon">&#9641;</div>
+      <p>Select or create a session to begin</p>
+    </div>
+    <div id="terminal-container" style="display:none;"></div>
+  </main>
+
+  <!-- ── Command Bar ────────────────────────────────────────── -->
+  <footer id="cmdbar"></footer>
+</div>
+
+<!-- ── Create Session Modal ─────────────────────────────────── -->
+<div id="modal-overlay">
+  <div id="modal-content">
+    <h3>Create Session</h3>
+    <div class="form-group">
+      <label for="inp-name">Name</label>
+      <input id="inp-name" type="text" placeholder="my-session" autocomplete="off" />
+    </div>
+    <div class="form-group">
+      <label for="inp-command">Command</label>
+      <input id="inp-command" type="text" placeholder="claude" autocomplete="off" />
+    </div>
+    <div class="form-group">
+      <label for="inp-args">Arguments (space-separated, optional)</label>
+      <input id="inp-args" type="text" placeholder="--verbose" autocomplete="off" />
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+      <button class="btn btn-primary" id="modal-create">Create</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { Terminal } from 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5/+esm';
+  import { FitAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/+esm';
+  import { WebLinksAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0/+esm';
+
+  // ── State ──────────────────────────────────────────────────
+  const params = new URLSearchParams(location.search);
+  const TOKEN = params.get('token') || '';
+
+  let sessions = [];
+  let activeSessionId = null;
+  let ws = null;
+  let term = null;
+  let fitAddon = null;
+  let commands = { preset: [], custom: [] };
+  let reconnectTimer = null;
+  let browserNotifEnabled = false;
+
+  // ── DOM refs ───────────────────────────────────────────────
+  const $ = (sel) => document.querySelector(sel);
+  const sessionListEl     = $('#session-list');
+  const cmdbarEl          = $('#cmdbar');
+  const connectionBadge   = $('#connection-badge');
+  const connectionText    = $('#connection-text');
+  const terminalContainer = $('#terminal-container');
+  const placeholderEl     = $('#no-session-placeholder');
+  const modalOverlay      = $('#modal-overlay');
+  const notifDropdown     = $('#notif-dropdown');
+  const sidebarEl         = $('#sidebar');
+  const sidebarOverlay    = $('#sidebar-overlay');
+
+  // ── Initialize Terminal ────────────────────────────────────
+  function initTerminal() {
+    if (term) return;
+    term = new Terminal({
       cursorBlink: true,
       fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontFamily: '"SF Mono", Menlo, Monaco, "Courier New", monospace',
       theme: {
         background: '#1e1e1e',
         foreground: '#d4d4d4',
+        cursor: '#58a6ff',
+        selectionBackground: '#264f7844',
       },
+      allowProposedApi: true,
     });
-
-    const fitAddon = new FitAddon();
+    fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
-    term.open(document.getElementById('terminal'));
-    fitAddon.fit();
+    term.open(terminalContainer);
 
-    function connect() {
-      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${protocol}//${location.host}/ws?token=${token}`);
+    term.onData((data) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'input', data }));
+      }
+    });
 
-      ws.onopen = () => {
-        statusEl.textContent = 'connected';
-        statusEl.className = 'connected';
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-      };
+    term.onResize(({ cols, rows }) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+      }
+    });
+  }
 
-      ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'output') {
-          term.write(msg.data);
-        }
-      };
+  // ── Connection badge ───────────────────────────────────────
+  function setConnectionStatus(status) {
+    connectionBadge.className = status;
+    const labels = { connected: 'connected', disconnected: 'disconnected', connecting: 'connecting' };
+    connectionText.textContent = labels[status] || status;
+  }
 
-      ws.onclose = () => {
-        statusEl.textContent = 'disconnected - reconnecting...';
-        statusEl.className = 'disconnected';
-        setTimeout(connect, 2000);
-      };
+  // ── Sessions API ───────────────────────────────────────────
+  async function fetchSessions() {
+    try {
+      const res = await fetch('/api/sessions');
+      sessions = await res.json();
+      renderSessions();
+    } catch (e) {
+      console.error('Failed to fetch sessions:', e);
+    }
+  }
 
-      ws.onerror = () => ws.close();
+  async function createSession(name, command, argsStr) {
+    const args = argsStr ? argsStr.split(/\s+/).filter(Boolean) : [];
+    try {
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, command, args }),
+      });
+      const created = await res.json();
+      await fetchSessions();
+      switchSession(created.id);
+    } catch (e) {
+      console.error('Failed to create session:', e);
+    }
+  }
 
-      term.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'input', data }));
-        }
+  async function deleteSession(id) {
+    try {
+      await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+      if (activeSessionId === id) {
+        disconnectWS();
+        activeSessionId = null;
+        showPlaceholder(true);
+        setConnectionStatus('disconnected');
+      }
+      await fetchSessions();
+    } catch (e) {
+      console.error('Failed to delete session:', e);
+    }
+  }
+
+  // ── Render sessions list ───────────────────────────────────
+  function renderSessions() {
+    sessionListEl.innerHTML = '';
+    sessions.forEach((s) => {
+      const el = document.createElement('div');
+      el.className = 'session-item' + (s.id === activeSessionId ? ' active' : '');
+
+      const statusClass = s.status === 'running' ? 'running'
+        : s.status === 'waiting-input' ? 'waiting-input'
+        : 'exited';
+
+      el.innerHTML = `
+        <span class="session-status ${statusClass}"></span>
+        <span class="session-name" title="${esc(s.name)}">${esc(s.name)}</span>
+        <button class="session-delete" title="Remove session">&times;</button>
+      `;
+
+      el.querySelector('.session-name').addEventListener('click', () => switchSession(s.id));
+      el.querySelector('.session-status').addEventListener('click', () => switchSession(s.id));
+      el.querySelector('.session-delete').addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteSession(s.id);
       });
 
-      term.onResize(({ cols, rows }) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-        }
-      });
+      sessionListEl.appendChild(el);
+    });
+
+    // Update command-bar highlights based on current session status
+    updateCommandHighlights();
+  }
+
+  function esc(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  // ── Switch session ─────────────────────────────────────────
+  async function switchSession(id) {
+    if (id === activeSessionId && ws && ws.readyState === WebSocket.OPEN) return;
+
+    activeSessionId = id;
+    showPlaceholder(false);
+    initTerminal();
+    term.clear();
+    term.reset();
+    renderSessions();
+    closeSidebar();
+
+    // Fetch buffer
+    try {
+      const res = await fetch(`/api/sessions/buffer?id=${id}`);
+      const { buffer } = await res.json();
+      if (buffer) term.write(buffer);
+    } catch (e) {
+      console.error('Failed to fetch buffer:', e);
     }
 
-    window.addEventListener('resize', () => fitAddon.fit());
-    connect();
-  </script>
+    // Connect WS
+    connectWS(id);
+    setTimeout(() => fitAddon.fit(), 50);
+  }
+
+  function showPlaceholder(show) {
+    placeholderEl.style.display = show ? 'flex' : 'none';
+    terminalContainer.style.display = show ? 'none' : 'block';
+  }
+
+  // ── WebSocket ──────────────────────────────────────────────
+  function disconnectWS() {
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    if (ws) {
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.close();
+      ws = null;
+    }
+  }
+
+  function connectWS(sessionId) {
+    disconnectWS();
+    setConnectionStatus('connecting');
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/ws/${sessionId}?token=${TOKEN}`);
+
+    ws.onopen = () => {
+      setConnectionStatus('connected');
+      if (term) {
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      }
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'output' && term) {
+          term.write(msg.data);
+        } else if (msg.type === 'sessions-updated') {
+          sessions = msg.sessions;
+          renderSessions();
+        } else if (msg.type === 'notification') {
+          handleNotification(msg);
+        }
+      } catch (e) {
+        console.error('WS message error:', e);
+      }
+    };
+
+    ws.onclose = () => {
+      setConnectionStatus('disconnected');
+      // Auto-reconnect only if this session is still active
+      if (activeSessionId === sessionId) {
+        reconnectTimer = setTimeout(() => connectWS(sessionId), 2000);
+      }
+    };
+
+    ws.onerror = () => {
+      if (ws) ws.close();
+    };
+  }
+
+  // ── Commands ───────────────────────────────────────────────
+  async function fetchCommands() {
+    try {
+      const res = await fetch('/commands.json');
+      commands = await res.json();
+      renderCommands();
+    } catch (e) {
+      console.error('Failed to fetch commands:', e);
+    }
+  }
+
+  function renderCommands() {
+    cmdbarEl.innerHTML = '';
+    const all = [...(commands.preset || []), ...(commands.custom || [])];
+    all.forEach((cmd) => {
+      const btn = document.createElement('button');
+      btn.className = 'cmd-btn';
+      btn.textContent = cmd.label;
+      btn.style.borderColor = cmd.color || '#30363d';
+      btn.style.color = cmd.color || '#c9d1d9';
+      btn.dataset.label = cmd.label.toLowerCase();
+      btn.addEventListener('click', () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input', data: cmd.command }));
+        }
+      });
+      cmdbarEl.appendChild(btn);
+    });
+  }
+
+  function updateCommandHighlights() {
+    const currentSession = sessions.find((s) => s.id === activeSessionId);
+    const isWaiting = currentSession && currentSession.status === 'waiting-input';
+    cmdbarEl.querySelectorAll('.cmd-btn').forEach((btn) => {
+      const label = btn.dataset.label;
+      if (isWaiting && (label === 'yes' || label === 'no')) {
+        btn.classList.add('highlight');
+      } else {
+        btn.classList.remove('highlight');
+      }
+    });
+  }
+
+  // ── Notifications ──────────────────────────────────────────
+  async function fetchNotificationState() {
+    try {
+      const res = await fetch('/api/notifications');
+      const state = await res.json();
+      $('#toggle-browser').checked = !!state.browser;
+      $('#toggle-feishu').checked = !!state.feishu;
+      browserNotifEnabled = !!state.browser;
+    } catch (e) {
+      console.error('Failed to fetch notification state:', e);
+    }
+  }
+
+  async function toggleNotification(channel, enabled) {
+    try {
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel, enabled }),
+      });
+      if (channel === 'browser') {
+        browserNotifEnabled = enabled;
+        if (enabled && Notification.permission !== 'granted') {
+          const perm = await Notification.requestPermission();
+          if (perm !== 'granted') {
+            $('#toggle-browser').checked = false;
+            browserNotifEnabled = false;
+            await fetch('/api/notifications', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ channel: 'browser', enabled: false }),
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to toggle notification:', e);
+    }
+  }
+
+  function handleNotification(msg) {
+    if (browserNotifEnabled && Notification.permission === 'granted') {
+      new Notification(msg.title || 'RTB v2', {
+        body: msg.body || 'Terminal needs your attention',
+        tag: msg.sessionId || 'rtb',
+      });
+    }
+  }
+
+  // ── Sidebar toggle (mobile) ────────────────────────────────
+  function openSidebar() {
+    sidebarEl.classList.add('open');
+    sidebarOverlay.classList.add('open');
+  }
+  function closeSidebar() {
+    sidebarEl.classList.remove('open');
+    sidebarOverlay.classList.remove('open');
+  }
+
+  // ── Modal ──────────────────────────────────────────────────
+  function openModal() {
+    modalOverlay.classList.add('open');
+    $('#inp-name').value = '';
+    $('#inp-command').value = '';
+    $('#inp-args').value = '';
+    setTimeout(() => $('#inp-name').focus(), 100);
+  }
+  function closeModal() {
+    modalOverlay.classList.remove('open');
+  }
+
+  // ── Event Listeners ────────────────────────────────────────
+  $('#hamburger').addEventListener('click', () => {
+    sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar();
+  });
+  sidebarOverlay.addEventListener('click', closeSidebar);
+
+  $('#bell-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    notifDropdown.classList.toggle('open');
+  });
+  document.addEventListener('click', (e) => {
+    if (!notifDropdown.contains(e.target) && e.target !== $('#bell-btn')) {
+      notifDropdown.classList.remove('open');
+    }
+  });
+
+  $('#toggle-browser').addEventListener('change', (e) => toggleNotification('browser', e.target.checked));
+  $('#toggle-feishu').addEventListener('change', (e) => toggleNotification('feishu', e.target.checked));
+
+  $('#add-session-btn').addEventListener('click', openModal);
+  $('#modal-cancel').addEventListener('click', closeModal);
+  modalOverlay.addEventListener('click', (e) => {
+    if (e.target === modalOverlay) closeModal();
+  });
+
+  $('#modal-create').addEventListener('click', () => {
+    const name = $('#inp-name').value.trim();
+    const command = $('#inp-command').value.trim();
+    const args = $('#inp-args').value.trim();
+    if (!name || !command) return;
+    closeModal();
+    createSession(name, command, args);
+  });
+
+  // Allow Enter to submit the modal
+  $('#modal-content').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      $('#modal-create').click();
+    }
+  });
+
+  // Resize terminal when window resizes
+  window.addEventListener('resize', () => {
+    if (fitAddon && activeSessionId) {
+      fitAddon.fit();
+    }
+  });
+
+  // ── Service Worker ─────────────────────────────────────────
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('SW registration failed:', err);
+    });
+  }
+
+  // ── Boot ───────────────────────────────────────────────────
+  fetchSessions();
+  fetchCommands();
+  fetchNotificationState();
+  setConnectionStatus('disconnected');
+</script>
+
 </body>
 </html>
