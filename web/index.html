@@ -228,6 +228,44 @@
     .btn-primary { background: #238636; color: #fff; }
     .btn-secondary { background: #21262d; color: #c9d1d9; }
 
+    /* ── Settings Modal ──────────────────────────────────────── */
+    #settings-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.6); z-index: 500;
+      align-items: center; justify-content: center;
+    }
+    #settings-overlay.open { display: flex; }
+    #settings-content {
+      background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+      padding: 24px; width: 420px; max-width: 90vw;
+      box-shadow: 0 16px 48px rgba(0,0,0,.5);
+      max-height: 80vh; overflow-y: auto;
+    }
+    #settings-content h3 {
+      font-size: 16px; color: #f0f6fc; margin-bottom: 20px;
+    }
+    .settings-section { margin-bottom: 20px; }
+    .settings-section h4 {
+      font-size: 12px; color: #8b949e; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-bottom: 12px;
+      padding-bottom: 6px; border-bottom: 1px solid #21262d;
+    }
+    .settings-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0; font-size: 14px; color: #c9d1d9;
+    }
+    .settings-value {
+      font-family: "SF Mono", Menlo, monospace; font-size: 13px; color: #8b949e;
+    }
+    .settings-row input[type="range"] {
+      width: 120px; accent-color: #58a6ff;
+    }
+    .settings-row select {
+      padding: 4px 8px; border-radius: 6px; border: 1px solid #30363d;
+      background: #0d1117; color: #c9d1d9; font-size: 13px; outline: none;
+    }
+    .settings-row select:focus { border-color: #58a6ff; }
+
     /* ── Sidebar overlay for mobile ────────────────────────────── */
     #sidebar-overlay {
       display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4);
@@ -343,6 +381,50 @@
   </div>
 </div>
 
+<!-- ── Settings Modal ──────────────────────────────────────── -->
+<div id="settings-overlay">
+  <div id="settings-content">
+    <h3>Settings</h3>
+    <div class="settings-section">
+      <h4>Server</h4>
+      <div class="settings-row">
+        <span>Port</span>
+        <span class="settings-value" id="settings-port">—</span>
+      </div>
+      <div class="settings-row">
+        <span>Tunnel</span>
+        <span class="settings-value" id="settings-tunnel">—</span>
+      </div>
+      <div class="settings-row">
+        <span>Feishu</span>
+        <span class="settings-value" id="settings-feishu">—</span>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h4>Terminal Display</h4>
+      <div class="settings-row">
+        <span>Font Size</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="range" id="settings-fontsize" min="12" max="24" value="14" />
+          <span id="fontsize-label" style="font-size:12px;color:#8b949e;min-width:28px;">14px</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span>Color Scheme</span>
+        <select id="settings-theme">
+          <option value="dark">Dark</option>
+          <option value="monokai">Monokai</option>
+          <option value="solarized">Solarized</option>
+          <option value="light">Light</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" id="settings-close">Close</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
   import { Terminal } from 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5/+esm';
   import { FitAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/+esm';
@@ -361,6 +443,34 @@
   let reconnectTimer = null;
   let browserNotifEnabled = false;
 
+  // ── Terminal Settings ─────────────────────────────────────
+  const THEMES = {
+    dark: { background: '#1e1e1e', foreground: '#d4d4d4', cursor: '#58a6ff', selectionBackground: '#264f7844' },
+    monokai: { background: '#272822', foreground: '#f8f8f2', cursor: '#f8f8f0', selectionBackground: '#49483e' },
+    solarized: { background: '#002b36', foreground: '#839496', cursor: '#93a1a1', selectionBackground: '#073642' },
+    light: { background: '#ffffff', foreground: '#383a42', cursor: '#526eff', selectionBackground: '#d7d7ff44' },
+  };
+
+  function loadTerminalSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('rtb-terminal-settings'));
+      if (saved && typeof saved.fontSize === 'number' && THEMES[saved.theme]) return saved;
+    } catch {}
+    return { fontSize: 14, theme: 'dark' };
+  }
+
+  function saveTerminalSettings(settings) {
+    localStorage.setItem('rtb-terminal-settings', JSON.stringify(settings));
+  }
+
+  function applyTerminalSettings(settings) {
+    if (term) {
+      term.options.fontSize = settings.fontSize;
+      term.options.theme = { ...term.options.theme, ...(THEMES[settings.theme] || THEMES.dark) };
+      if (fitAddon && activeSessionId) fitAddon.fit();
+    }
+  }
+
   // ── DOM refs ───────────────────────────────────────────────
   const $ = (sel) => document.querySelector(sel);
   const sessionListEl     = $('#session-list');
@@ -377,15 +487,14 @@
   // ── Initialize Terminal ────────────────────────────────────
   function initTerminal() {
     if (term) return;
+    const settings = loadTerminalSettings();
+    const themeColors = THEMES[settings.theme] || THEMES.dark;
     term = new Terminal({
       cursorBlink: true,
-      fontSize: 14,
+      fontSize: settings.fontSize,
       fontFamily: '"SF Mono", Menlo, Monaco, "Courier New", monospace',
       theme: {
-        background: '#1e1e1e',
-        foreground: '#d4d4d4',
-        cursor: '#58a6ff',
-        selectionBackground: '#264f7844',
+        ...themeColors,
       },
       allowProposedApi: true,
     });
@@ -747,6 +856,56 @@
       console.warn('SW registration failed:', err);
     });
   }
+
+  // ── Settings ────────────────────────────────────────────────
+  const settingsOverlay = $('#settings-overlay');
+
+  async function openSettings() {
+    settingsOverlay.classList.add('open');
+    const settings = loadTerminalSettings();
+    $('#settings-fontsize').value = settings.fontSize;
+    $('#fontsize-label').textContent = settings.fontSize + 'px';
+    $('#settings-theme').value = settings.theme;
+
+    try {
+      const res = await fetch('/api/settings');
+      const cfg = await res.json();
+      $('#settings-port').textContent = cfg.port;
+      $('#settings-tunnel').textContent = cfg.tunnel ? cfg.tunnel.hostname : 'not configured';
+      $('#settings-feishu').textContent = cfg.feishu?.configured ? 'connected' : 'not configured';
+    } catch {
+      $('#settings-port').textContent = '—';
+      $('#settings-tunnel').textContent = '—';
+      $('#settings-feishu').textContent = '—';
+    }
+  }
+
+  function closeSettings() {
+    settingsOverlay.classList.remove('open');
+  }
+
+  $('#gear-btn').addEventListener('click', openSettings);
+  $('#settings-close').addEventListener('click', closeSettings);
+  settingsOverlay.addEventListener('click', (e) => {
+    if (e.target === settingsOverlay) closeSettings();
+  });
+
+  $('#settings-fontsize').addEventListener('input', (e) => {
+    const size = parseInt(e.target.value);
+    $('#fontsize-label').textContent = size + 'px';
+    const settings = loadTerminalSettings();
+    settings.fontSize = size;
+    saveTerminalSettings(settings);
+    applyTerminalSettings(settings);
+  });
+
+  $('#settings-theme').addEventListener('change', (e) => {
+    const theme = e.target.value;
+    const settings = loadTerminalSettings();
+    settings.theme = theme;
+    saveTerminalSettings(settings);
+    applyTerminalSettings(settings);
+  });
 
   // ── Boot ───────────────────────────────────────────────────
   fetchSessions();

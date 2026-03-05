@@ -204,6 +204,16 @@ export async function startServer(config: ServerConfig): Promise<void> {
       return;
     }
 
+    // API: get server settings (read-only)
+    if (url.pathname === '/api/settings' && req.method === 'GET') {
+      const tunnelConfig = getTunnelConfig();
+      return jsonResponse(200, {
+        port: config.port,
+        tunnel: tunnelConfig ? { name: tunnelConfig.name, hostname: tunnelConfig.hostname } : null,
+        feishu: config.feishu ? { configured: true } : { configured: false },
+      });
+    }
+
     // Serve static files
     if (url.pathname === '/commands.json') {
       const cmdPath = path.resolve(__dirname, '../web/commands.json');
