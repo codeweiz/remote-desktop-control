@@ -21,7 +21,7 @@ describe('integration: SessionManager + WS', () => {
     wsServer = new WsServer(token);
     await wsServer.startStandalone(9880);
 
-    const session = sessionManager.create('test-cat', 'cat', []);
+    const session = sessionManager.create('test-cat', 'cat', [], 80, 24);
     const pty = sessionManager.getPty(session.id)!;
 
     pty.onData((data) => {
@@ -54,7 +54,7 @@ describe('integration: SessionManager + WS', () => {
     wsServer = new WsServer(token);
     await wsServer.startStandalone(9881);
 
-    const session = sessionManager.create('test-buffer', 'echo', ['buffer-replay-test']);
+    const session = sessionManager.create('test-buffer', 'echo', ['buffer-replay-test'], 80, 24);
     const pty = sessionManager.getPty(session.id)!;
 
     pty.onData((data) => {

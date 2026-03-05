@@ -19,17 +19,15 @@ export class PtyManager {
     this.maxLines = options?.bufferSize ?? 5000;
   }
 
-  spawn(command: string, args: string[], cols = 80, rows = 24, shellCommand?: string): void {
+  spawn(cols = 80, rows = 24, shellCommand?: string): void {
     // Clean env: remove CLAUDECODE to allow nested Claude Code sessions
     const env = { ...process.env } as Record<string, string>;
     delete env.CLAUDECODE;
 
-    // If shellCommand is provided, spawn shell and write command into it
+    // Always spawn user's shell
     const shell = process.env.SHELL || '/bin/bash';
-    const spawnCmd = shellCommand ? shell : command;
-    const spawnArgs = shellCommand ? [] : args;
 
-    this.process = pty.spawn(spawnCmd, spawnArgs, {
+    this.process = pty.spawn(shell, [], {
       name: 'xterm-256color',
       cols,
       rows,
@@ -46,7 +44,7 @@ export class PtyManager {
       for (const cb of this.exitCallbacks) cb(exitCode);
     });
 
-    // Write the command into the shell after a short delay
+    // Write the command into the shell after a short delay (if provided)
     if (shellCommand) {
       setTimeout(() => {
         this.process?.write(shellCommand + '\n');

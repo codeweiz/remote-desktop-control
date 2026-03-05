@@ -367,7 +367,7 @@
       <input id="inp-name" type="text" placeholder="my-session" autocomplete="off" />
     </div>
     <div class="form-group">
-      <label for="inp-command">Command</label>
+      <label for="inp-command">Command (optional, empty = plain shell)</label>
       <input id="inp-command" type="text" placeholder="claude" autocomplete="off" />
     </div>
     <div class="form-group">
@@ -830,7 +830,7 @@
     const name = $('#inp-name').value.trim();
     const command = $('#inp-command').value.trim();
     const args = $('#inp-args').value.trim();
-    if (!name || !command) return;
+    if (!name) return;
     closeModal();
     createSession(name, command, args);
   });

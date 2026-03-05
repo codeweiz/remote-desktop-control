@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { SessionManager } from './session-manager.js';
 import { WsServer } from './ws-server.js';
 import { NotificationManager } from './notification.js';
-import { FeishuBot } from './feishu.js';
+import { FeishuBot, FeishuSessionAdapter } from './feishu.js';
 import { startTunnel, getTunnelConfig } from './tunnel.js';
 import { generateToken } from './auth.js';
 
@@ -19,8 +19,7 @@ export interface ServerConfig {
   feishu?: {
     appId: string;
     appSecret: string;
-    chatId: string;
-    webhookPort: number;
+    chatId?: string;
   };
 }
 
@@ -41,8 +40,46 @@ function wireSessionPty(sessionId: string, sessionManager: SessionManager, wsSer
   if (!pty) return;
   pty.onData((data) => {
     wsServer.broadcastToSession(sessionId, JSON.stringify({ type: 'output', data }));
-    feishuBot?.pushOutput(data);
+    feishuBot?.pushOutput(sessionId, data);
   });
+}
+
+function createSessionAdapter(sessionManager: SessionManager, wsServer: WsServer, feishuBot: FeishuBot): FeishuSessionAdapter {
+  return {
+    listSessions() {
+      return sessionManager.list().map(s => ({ id: s.id, name: s.name, status: s.status }));
+    },
+    createSession(name: string, command: string) {
+      const args = command ? command.split(/\s+/) : [];
+      const cmd = args.shift() || '';
+      const session = sessionManager.create(name, cmd, args);
+      wireSessionPty(session.id, sessionManager, wsServer, feishuBot);
+      return { id: session.id, name: session.name };
+    },
+    killSession(idOrName: string) {
+      const sessions = sessionManager.list();
+      const target = sessions.find(s =>
+        s.name.toLowerCase() === idOrName.toLowerCase() || s.id === idOrName
+      );
+      if (!target) return false;
+      sessionManager.remove(target.id);
+      return true;
+    },
+    writeToSession(idOrName: string, data: string) {
+      const sessions = sessionManager.list();
+      const target = sessions.find(s =>
+        s.name.toLowerCase() === idOrName.toLowerCase() || s.id === idOrName
+      );
+      if (!target) return false;
+      sessionManager.getPty(target.id)?.write(data);
+      sessionManager.markActive(target.id);
+      return true;
+    },
+    getSessionIdByName(name: string) {
+      const sessions = sessionManager.list();
+      return sessions.find(s => s.name.toLowerCase() === name.toLowerCase())?.id;
+    },
+  };
 }
 
 export async function startServer(config: ServerConfig): Promise<void> {
@@ -56,41 +93,8 @@ export async function startServer(config: ServerConfig): Promise<void> {
     feishuBot = new FeishuBot(config.feishu);
     await feishuBot.init();
 
-    feishuBot.onInput((data) => {
-      const sessions = sessionManager.list();
-      const active = sessions.find(s => s.status === 'waiting-input') || sessions[0];
-      if (active) {
-        sessionManager.getPty(active.id)?.write(data);
-        sessionManager.markActive(active.id);
-      }
-    });
-
-    const feishuServer = http.createServer((req, res) => {
-      if (req.method === 'POST') {
-        let body = '';
-        req.on('data', (chunk: Buffer) => { body += chunk; });
-        req.on('end', () => {
-          try {
-            const parsed = JSON.parse(body);
-            if (parsed.challenge) {
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ challenge: parsed.challenge }));
-              return;
-            }
-            feishuBot!.handleEvent(parsed);
-          } catch { /* ignore */ }
-          res.writeHead(200);
-          res.end('ok');
-        });
-      } else {
-        res.writeHead(404);
-        res.end();
-      }
-    });
-
-    feishuServer.listen(config.feishu.webhookPort, () => {
-      console.log(`  Feishu:       webhook on port ${config.feishu!.webhookPort}`);
-    });
+    const adapter = createSessionAdapter(sessionManager, wsServer, feishuBot);
+    feishuBot.setSessionAdapter(adapter);
   }
 
   // Notification manager
@@ -106,7 +110,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
     onFeishuPush: (sessionId, event, message) => {
       const session = sessionManager.get(sessionId);
       const name = session?.name || sessionId;
-      feishuBot?.pushOutput(`[${name}] ${event}: ${message}`);
+      feishuBot?.pushSystemMessage(`[${name}] ${event}: ${message}`);
     },
   });
 
@@ -153,7 +157,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
       req.on('end', () => {
         try {
           const { name, command, args: cmdArgs } = JSON.parse(body);
-          const session = sessionManager.create(name || command, command, cmdArgs || []);
+          const session = sessionManager.create(name || command || 'shell', command || '', cmdArgs || []);
           wireSessionPty(session.id, sessionManager, wsServer, feishuBot);
           jsonResponse(201, session);
         } catch {
@@ -214,7 +218,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
       return jsonResponse(200, {
         port: config.port,
         tunnel: tunnelConfig ? { name: tunnelConfig.name, hostname: tunnelConfig.hostname } : null,
-        feishu: config.feishu ? { configured: true } : { configured: false },
+        feishu: config.feishu ? { configured: true, mode: 'long-connection' } : { configured: false },
       });
     }
 
@@ -262,6 +266,8 @@ export async function startServer(config: ServerConfig): Promise<void> {
     const { command, args: cmdArgs } = config.initialCommand;
     const session = sessionManager.create(command, command, cmdArgs);
     wireSessionPty(session.id, sessionManager, wsServer, feishuBot);
+    // Auto-set as feishu current session
+    if (feishuBot) feishuBot.setCurrentSession(session.id);
   }
 
   // Print access info
@@ -283,6 +289,9 @@ export async function startServer(config: ServerConfig): Promise<void> {
     } catch (err) {
       console.error(`  Tunnel:       ${(err as Error).message}`);
     }
+  }
+  if (config.feishu) {
+    console.log(`  Feishu:       connected (long connection)`);
   }
 
   console.log('');

@@ -35,7 +35,7 @@ describe('SessionManager', () => {
 
   it('removes a session', () => {
     manager = new SessionManager();
-    const session = manager.create('remove-me', 'cat', []);
+    const session = manager.create('remove-me', '', []);
     manager.remove(session.id);
     expect(manager.get(session.id)).toBeUndefined();
   });
@@ -45,15 +45,30 @@ describe('SessionManager', () => {
     const session = manager.create('shell-test', 'echo', ['hello-from-shell']);
     const pty = manager.getPty(session.id)!;
 
-    // Wait for command to execute inside the shell
     const output: string[] = [];
     pty.onData((data) => output.push(data));
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     const allOutput = output.join('');
-    // The shell should still be running even after echo completes
     const updated = manager.get(session.id);
     expect(updated?.status).toBe('running');
     expect(allOutput).toContain('hello-from-shell');
+  });
+
+  it('creates a plain shell session when command is empty', async () => {
+    manager = new SessionManager();
+    const session = manager.create('plain-shell', '', []);
+    expect(session.status).toBe('running');
+
+    const pty = manager.getPty(session.id)!;
+    const output: string[] = [];
+    pty.onData((data) => output.push(data));
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    pty.write('echo plain-shell-works\n');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const allOutput = output.join('');
+    expect(allOutput).toContain('plain-shell-works');
   });
 });

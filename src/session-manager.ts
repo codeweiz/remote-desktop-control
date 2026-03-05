@@ -59,13 +59,16 @@ export class SessionManager {
       detector.processExited(code);
     });
 
-    // Build the full command string for shell-wrapping
-    const fullCommand = args.length > 0
-      ? `${command} ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`
-      : command;
+    // Build the shell command to write into the spawned shell (if any)
+    let shellCommand: string | undefined;
+    if (command) {
+      shellCommand = args.length > 0
+        ? `${command} ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`
+        : command;
+    }
 
-    // Spawn shell and write command into it
-    pty.spawn(command, args, cols, rows, fullCommand);
+    // Spawn shell; optionally write command into it
+    pty.spawn(cols, rows, shellCommand);
     return this.toInfo(session);
   }
 

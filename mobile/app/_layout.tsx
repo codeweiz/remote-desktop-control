@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { LogBox } from 'react-native';
 import { Stack } from 'expo-router';
 import * as Notifications from 'expo-notifications';
+import { ThemeProvider } from '../contexts/ThemeContext';
 
 LogBox.ignoreLogs(['expo-notifications']);
 
@@ -21,9 +22,11 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="connect" />
-      <Stack.Screen name="(tabs)" />
-    </Stack>
+    <ThemeProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="connect" />
+        <Stack.Screen name="(tabs)" />
+      </Stack>
+    </ThemeProvider>
   );
 }

@@ -10,6 +10,8 @@ export class WsServer {
   private inputCallbacks: InputCallback[] = [];
   private resizeCallbacks: ResizeCallback[] = [];
   private sessionClients = new Map<string, Set<WebSocket>>();
+  private aliveMap = new WeakMap<WebSocket, boolean>();
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private token: string,
@@ -48,6 +50,11 @@ export class WsServer {
         this.sessionClients.set(sessionId, new Set());
       }
       this.sessionClients.get(sessionId)!.add(ws);
+      this.aliveMap.set(ws, true);
+
+      ws.on('pong', () => {
+        this.aliveMap.set(ws, true);
+      });
 
       ws.on('message', (raw) => {
         try {
@@ -56,6 +63,10 @@ export class WsServer {
             for (const cb of this.inputCallbacks) cb(sessionId, msg.data);
           } else if (msg.type === 'resize' && msg.cols && msg.rows) {
             for (const cb of this.resizeCallbacks) cb(sessionId, msg.cols, msg.rows);
+          } else if (msg.type === 'ping') {
+            // Application-level ping from mobile client
+            this.aliveMap.set(ws, true);
+            ws.send(JSON.stringify({ type: 'pong' }));
           }
         } catch { /* ignore */ }
       });
@@ -64,6 +75,23 @@ export class WsServer {
         this.sessionClients.get(sessionId)?.delete(ws);
       });
     });
+
+    // Server-side heartbeat: check every 30s, terminate dead connections
+    this.startHeartbeat();
+  }
+
+  private startHeartbeat(): void {
+    this.heartbeatTimer = setInterval(() => {
+      if (!this.wss) return;
+      for (const ws of this.wss.clients) {
+        if (this.aliveMap.get(ws) === false) {
+          ws.terminate();
+          continue;
+        }
+        this.aliveMap.set(ws, false);
+        ws.ping();
+      }
+    }, 30000);
   }
 
   onInput(callback: InputCallback): void {
@@ -94,6 +122,10 @@ export class WsServer {
   }
 
   close(): Promise<void> {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
     return new Promise((resolve, reject) => {
       if (!this.wss) return resolve();
       for (const client of this.wss.clients) {

@@ -1,13 +1,13 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, AppState, TouchableOpacity } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useServer } from '../../hooks/useServer';
 import { THEME_COLORS } from '../../hooks/useTerminalSettings';
-import { QuickCommandBar } from '../../components/QuickCommandBar';
+import { useTheme } from '../../contexts/ThemeContext';
+import { TerminalInput } from '../../components/TerminalInput';
 
 const TERMINAL_HTML = `<!DOCTYPE html>
 <html>
@@ -38,21 +38,27 @@ term.loadAddon(fitAddon);
 term.open(document.getElementById('terminal'));
 fitAddon.fit();
 
-// Focus terminal textarea on tap so keyboard appears
-document.getElementById('terminal').addEventListener('click', () => {
-  const textarea = document.querySelector('.xterm-helper-textarea');
-  if (textarea) {
-    textarea.focus();
-  }
-});
-
 let ws = null;
+let reconnectTimer = null;
+let lastConnectParams = null;
+let reconnectAttempts = 0;
+
+function notify(type, extra) {
+  window.ReactNativeWebView?.postMessage(JSON.stringify({ type, ...extra }));
+}
 
 window.addEventListener('message', (e) => {
   try {
     const msg = JSON.parse(e.data);
     if (msg.type === 'connect') {
-      connectWS(msg.wsUrl, msg.sessionId, msg.token);
+      lastConnectParams = { wsUrl: msg.wsUrl, sessionId: msg.sessionId, token: msg.token };
+      reconnectAttempts = 0;
+      connectWS(msg.wsUrl, msg.sessionId, msg.token, false);
+    } else if (msg.type === 'reconnect') {
+      if (lastConnectParams) {
+        reconnectAttempts = 0;
+        connectWS(lastConnectParams.wsUrl, lastConnectParams.sessionId, lastConnectParams.token, true);
+      }
     } else if (msg.type === 'input') {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'input', data: msg.data }));
@@ -66,13 +72,9 @@ window.addEventListener('message', (e) => {
         document.body.style.background = msg.theme.background || '#1e1e1e';
       }
       fitAddon.fit();
-      // Report new size after settings change
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
       }
-    } else if (msg.type === 'focus') {
-      const textarea = document.querySelector('.xterm-helper-textarea');
-      if (textarea) textarea.focus();
     }
   } catch {}
 });
@@ -83,13 +85,17 @@ term.onData((data) => {
   }
 });
 
-function connectWS(wsUrl, sessionId, token) {
-  if (ws) { ws.onclose = null; ws.close(); }
-  term.clear(); term.reset();
+function connectWS(wsUrl, sessionId, token, isReconnect) {
+  clearTimeout(reconnectTimer);
+  if (ws) { ws.onclose = null; ws.onerror = null; ws.close(); }
+  if (!isReconnect) { term.clear(); term.reset(); }
 
+  notify('connecting');
   ws = new WebSocket(wsUrl + '/ws/' + sessionId + '?token=' + token);
+
   ws.onopen = () => {
-    window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'connected' }));
+    reconnectAttempts = 0;
+    notify('connected');
     ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
   };
   ws.onmessage = (event) => {
@@ -97,14 +103,30 @@ function connectWS(wsUrl, sessionId, token) {
       const msg = JSON.parse(event.data);
       if (msg.type === 'output') term.write(msg.data);
       if (msg.type === 'notification') {
-        window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'notification', message: msg.message }));
+        notify('notification', { message: msg.message });
       }
     } catch {}
   };
   ws.onclose = () => {
-    window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'disconnected' }));
+    notify('disconnected');
+    // Auto-reconnect with backoff (max 10s)
+    reconnectAttempts++;
+    const delay = Math.min(1000 * reconnectAttempts, 10000);
+    reconnectTimer = setTimeout(() => {
+      if (lastConnectParams) {
+        connectWS(lastConnectParams.wsUrl, lastConnectParams.sessionId, lastConnectParams.token, true);
+      }
+    }, delay);
   };
+  ws.onerror = () => {};
 }
+
+// Heartbeat
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'ping' }));
+  }
+}, 25000);
 
 window.addEventListener('resize', () => fitAddon.fit());
 term.onResize(({cols, rows}) => {
@@ -129,12 +151,16 @@ async function loadSettings() {
   return { fontSize: 14, theme: 'dark' };
 }
 
+type ConnStatus = 'idle' | 'connecting' | 'connected' | 'disconnected';
+
 export default function TerminalScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
   const { wsUrl, baseUrl, config } = useServer();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const webViewRef = useRef<WebView>(null);
   const [webViewReady, setWebViewReady] = useState(false);
+  const [connStatus, setConnStatus] = useState<ConnStatus>('idle');
 
   const sendToWebView = useCallback((msg: object) => {
     webViewRef.current?.injectJavaScript(
@@ -142,51 +168,84 @@ export default function TerminalScreen() {
     );
   }, []);
 
-  // Apply settings from AsyncStorage whenever terminal tab gains focus
+  const connectedOnce = useRef(false);
+
+  // Apply settings when tab gains focus; reconnect only after initial connect
   useFocusEffect(
     useCallback(() => {
       if (!webViewReady) return;
       loadSettings().then((s) => {
-        const colors = THEME_COLORS[s.theme] || THEME_COLORS.dark;
-        sendToWebView({ type: 'settings', fontSize: s.fontSize, theme: colors });
+        const themeColors = THEME_COLORS[s.theme] || THEME_COLORS.dark;
+        sendToWebView({ type: 'settings', fontSize: s.fontSize, theme: themeColors });
       });
-    }, [webViewReady, sendToWebView])
+      if (sessionId && connectedOnce.current) {
+        sendToWebView({ type: 'reconnect' });
+      }
+    }, [webViewReady, sendToWebView, sessionId])
   );
 
+  // Reconnect when app returns from background
   useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && webViewReady && sessionId && connectedOnce.current) {
+        sendToWebView({ type: 'reconnect' });
+      }
+    });
+    return () => sub.remove();
+  }, [webViewReady, sessionId, sendToWebView]);
+
+  useEffect(() => {
+    connectedOnce.current = false;
+    setConnStatus('idle');
     if (sessionId && wsUrl && config && webViewReady) {
       const timer = setTimeout(async () => {
-        // Apply saved settings first
         const s = await loadSettings();
-        const colors = THEME_COLORS[s.theme] || THEME_COLORS.dark;
-        sendToWebView({ type: 'settings', fontSize: s.fontSize, theme: colors });
+        const themeColors = THEME_COLORS[s.theme] || THEME_COLORS.dark;
+        sendToWebView({ type: 'settings', fontSize: s.fontSize, theme: themeColors });
 
-        // Then fetch buffer and connect
         try {
           const res = await fetch(`${baseUrl}/api/sessions/buffer?id=${sessionId}`);
           const { buffer } = await res.json();
           if (buffer) sendToWebView({ type: 'buffer', data: buffer });
         } catch {}
         sendToWebView({ type: 'connect', wsUrl, sessionId, token: config.token });
+        connectedOnce.current = true;
       }, 500);
       return () => clearTimeout(timer);
     }
   }, [sessionId, wsUrl, config, baseUrl, sendToWebView, webViewReady]);
 
-  function handleCommand(command: string) {
-    sendToWebView({ type: 'input', data: command });
+  function handleInput(data: string) {
+    sendToWebView({ type: 'input', data });
+  }
+
+  function handleReconnect() {
+    sendToWebView({ type: 'reconnect' });
   }
 
   if (!sessionId) {
     return (
-      <View style={[styles.placeholder, { paddingTop: insets.top }]}>
-        <Text style={styles.placeholderText}>Select a session to connect</Text>
+      <View style={[styles.placeholder, { paddingTop: insets.top, backgroundColor: colors.background }]}>
+        <Text style={[styles.placeholderText, { color: colors.textMuted }]}>Select a session to connect</Text>
       </View>
     );
   }
 
+  const statusColor = connStatus === 'connected' ? '#2ea043'
+    : connStatus === 'connecting' ? '#d29922'
+    : connStatus === 'disconnected' ? '#f85149'
+    : '#484f58';
+
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={[styles.container, { paddingTop: insets.top, backgroundColor: colors.terminalBg }]}>
+      {connStatus !== 'connected' && connStatus !== 'idle' && (
+        <TouchableOpacity style={[styles.statusBar, { backgroundColor: statusColor + '22' }]} onPress={handleReconnect}>
+          <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+          <Text style={[styles.statusText, { color: statusColor }]}>
+            {connStatus === 'connecting' ? 'Connecting...' : 'Disconnected — tap to reconnect'}
+          </Text>
+        </TouchableOpacity>
+      )}
       <WebView
         ref={webViewRef}
         source={{ html: TERMINAL_HTML, baseUrl: 'https://cdn.jsdelivr.net' }}
@@ -200,26 +259,36 @@ export default function TerminalScreen() {
         onMessage={(event) => {
           try {
             const msg = JSON.parse(event.nativeEvent.data);
-            if (msg.type === 'notification') {
-              Notifications.scheduleNotificationAsync({
-                content: {
-                  title: 'RTB',
-                  body: msg.message || 'Terminal needs attention',
-                },
-                trigger: null,
-              });
-            }
+            if (msg.type === 'connected') setConnStatus('connected');
+            else if (msg.type === 'disconnected') setConnStatus('disconnected');
+            else if (msg.type === 'connecting') setConnStatus('connecting');
           } catch {}
         }}
       />
-      <QuickCommandBar onCommand={handleCommand} />
+      <TerminalInput onInput={handleInput} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0d1117' },
+  container: { flex: 1 },
   webview: { flex: 1 },
-  placeholder: { flex: 1, backgroundColor: '#0d1117', justifyContent: 'center', alignItems: 'center' },
-  placeholderText: { color: '#484f58', fontSize: 15 },
+  placeholder: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  placeholderText: { fontSize: 15 },
+  statusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
 });

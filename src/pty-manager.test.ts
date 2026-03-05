@@ -13,7 +13,7 @@ describe('PtyManager', () => {
     pty = new PtyManager();
     const output: string[] = [];
     pty.onData((data) => output.push(data));
-    pty.spawn('echo', ['hello-from-pty']);
+    pty.spawn(80, 24, 'echo hello-from-pty');
 
     await new Promise((resolve) => setTimeout(resolve, 500));
     const joined = output.join('');
@@ -24,7 +24,7 @@ describe('PtyManager', () => {
     pty = new PtyManager();
     const output: string[] = [];
     pty.onData((data) => output.push(data));
-    pty.spawn('cat', []);
+    pty.spawn(80, 24, 'cat');
 
     await new Promise((resolve) => setTimeout(resolve, 200));
     pty.write('test-input\n');
@@ -34,25 +34,27 @@ describe('PtyManager', () => {
     expect(joined).toContain('test-input');
   });
 
-  it('emits exit event', async () => {
+  it('emits exit event when shell is killed', async () => {
     pty = new PtyManager();
     let exitCode: number | undefined;
     pty.onExit((code) => { exitCode = code; });
-    pty.spawn('echo', ['done']);
+    pty.spawn(80, 24);
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    pty.kill();
+    await new Promise((resolve) => setTimeout(resolve, 200));
     expect(exitCode).toBeDefined();
   });
 
   it('supports resize', () => {
     pty = new PtyManager();
-    pty.spawn('echo', ['hi']);
+    pty.spawn(80, 24);
     expect(() => pty!.resize(120, 40)).not.toThrow();
   });
 
   it('maintains an output buffer', async () => {
     pty = new PtyManager();
-    pty.spawn('echo', ['buffer-test']);
+    pty.spawn(80, 24, 'echo buffer-test');
     await new Promise((resolve) => setTimeout(resolve, 500));
     const buffer = pty.getBuffer();
     expect(buffer).toContain('buffer-test');
@@ -60,8 +62,20 @@ describe('PtyManager', () => {
 
   it('buffer does not exceed max size', () => {
     pty = new PtyManager({ bufferSize: 10 });
-    pty.spawn('echo', ['hi']);
+    pty.spawn(80, 24);
     const buffer = pty.getBuffer();
     expect(typeof buffer).toBe('string');
+  });
+
+  it('spawns a plain shell when no command is given', async () => {
+    pty = new PtyManager();
+    pty.spawn(80, 24);
+    expect(pty.isRunning()).toBe(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    pty.write('echo shell-ok\n');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const buffer = pty.getBuffer();
+    expect(buffer).toContain('shell-ok');
   });
 });

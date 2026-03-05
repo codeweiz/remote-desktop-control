@@ -14,7 +14,8 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.rtb.mobile"
+      "bundleIdentifier": "com.rtb.mobile",
+      "entitlements": {}
     },
     "android": {
       "package": "com.rtb.mobile",
