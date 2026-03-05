@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { spawn as cpSpawn } from 'node:child_process';
 import { PtyManager } from './pty-manager.js';
 import { WsServer } from './ws-server.js';
 import { FeishuBot } from './feishu.js';
@@ -14,6 +15,7 @@ export interface ServerConfig {
   command: string;
   args: string[];
   port: number;
+  tunnel?: boolean;
   feishu?: {
     appId: string;
     appSecret: string;
@@ -122,5 +124,46 @@ export async function startServer(config: ServerConfig): Promise<void> {
   if (feishuBot) {
     console.log(`  Feishu:       connected`);
   }
+
+  // Cloudflare Tunnel (optional)
+  if (config.tunnel) {
+    startTunnel(config.port, token);
+  }
+
   console.log('');
+}
+
+function startTunnel(port: number, token: string): void {
+  const cf = cpSpawn('cloudflared', ['tunnel', '--url', `http://localhost:${port}`], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let tunnelUrl = '';
+
+  const handleOutput = (data: Buffer) => {
+    const line = data.toString();
+    // cloudflared prints the URL to stderr
+    const match = line.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+    if (match && !tunnelUrl) {
+      tunnelUrl = match[0];
+      console.log(`  Tunnel:       ${tunnelUrl}?token=${token}`);
+    }
+  };
+
+  cf.stdout.on('data', handleOutput);
+  cf.stderr.on('data', handleOutput);
+
+  cf.on('error', (err) => {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      console.error('  Tunnel:       cloudflared not found. Install: brew install cloudflared');
+    } else {
+      console.error('  Tunnel:       failed to start:', err.message);
+    }
+  });
+
+  cf.on('exit', (code) => {
+    if (code !== null && code !== 0) {
+      console.error(`  Tunnel exited with code ${code}`);
+    }
+  });
 }

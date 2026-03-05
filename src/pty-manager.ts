@@ -9,12 +9,16 @@ export class PtyManager {
   private exitCallbacks: ExitCallback[] = [];
 
   spawn(command: string, args: string[], cols = 80, rows = 24): void {
+    // Clean env: remove CLAUDECODE to allow nested Claude Code sessions
+    const env = { ...process.env } as Record<string, string>;
+    delete env.CLAUDECODE;
+
     this.process = pty.spawn(command, args, {
       name: 'xterm-256color',
       cols,
       rows,
       cwd: process.cwd(),
-      env: process.env as Record<string, string>,
+      env,
     });
 
     this.process.onData((data) => {

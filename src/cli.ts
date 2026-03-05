@@ -8,6 +8,7 @@ if (subcommand !== 'start' || args.length < 2) {
   console.log('');
   console.log('Options:');
   console.log('  --port <port>              Web terminal port (default: 3000)');
+  console.log('  --tunnel                   Enable Cloudflare Tunnel for public access');
   console.log('  --feishu-app-id <id>       Feishu app ID');
   console.log('  --feishu-app-secret <s>    Feishu app secret');
   console.log('  --feishu-chat-id <id>      Feishu chat ID');
@@ -33,6 +34,7 @@ function getOpt(name: string): string | undefined {
 }
 
 const port = parseInt(getOpt('--port') || '3000', 10);
+const tunnel = args.includes('--tunnel');
 
 const feishuAppId = getOpt('--feishu-app-id') || process.env.FEISHU_APP_ID;
 const feishuAppSecret = getOpt('--feishu-app-secret') || process.env.FEISHU_APP_SECRET;
@@ -43,7 +45,7 @@ const feishu = feishuAppId && feishuAppSecret && feishuChatId
   ? { appId: feishuAppId, appSecret: feishuAppSecret, chatId: feishuChatId, webhookPort: feishuWebhookPort }
   : undefined;
 
-startServer({ command, args: commandArgs, port, feishu }).catch((err) => {
+startServer({ command, args: commandArgs, port, tunnel, feishu }).catch((err) => {
   console.error('Failed to start:', err);
   process.exit(1);
 });
