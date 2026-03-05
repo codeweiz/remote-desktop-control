@@ -11,63 +11,77 @@ describe('WsServer', () => {
   });
 
   it('rejects connection without valid token', async () => {
-    server = new WsServer(9871, 'secret-token');
-    await server.start();
-
-    const ws = new WebSocket('ws://localhost:9871?token=wrong');
+    server = new WsServer('secret-token');
+    await server.startStandalone(9871);
+    const ws = new WebSocket('ws://localhost:9871/ws/abc123?token=wrong');
     const closed = new Promise<number>((resolve) => {
       ws.on('close', (code) => resolve(code));
     });
-    const code = await closed;
-    expect(code).toBe(1008);
+    expect(await closed).toBe(1008);
   });
 
-  it('accepts connection with valid token', async () => {
-    server = new WsServer(9872, 'secret-token');
-    await server.start();
+  it('rejects connection without session path', async () => {
+    server = new WsServer('tok');
+    await server.startStandalone(9872);
+    const ws = new WebSocket('ws://localhost:9872/ws?token=tok');
+    const closed = new Promise<number>((resolve) => {
+      ws.on('close', (code) => resolve(code));
+    });
+    expect(await closed).toBe(1008);
+  });
 
-    const ws = new WebSocket('ws://localhost:9872?token=secret-token');
+  it('accepts connection with valid token and session path', async () => {
+    server = new WsServer('tok');
+    await server.startStandalone(9873);
+    const ws = new WebSocket('ws://localhost:9873/ws/abc123?token=tok');
     const opened = new Promise<boolean>((resolve) => {
       ws.on('open', () => resolve(true));
       ws.on('error', () => resolve(false));
     });
-    const result = await opened;
-    expect(result).toBe(true);
+    expect(await opened).toBe(true);
     ws.close();
   });
 
-  it('broadcasts data to connected clients', async () => {
-    server = new WsServer(9873, 'tok');
-    await server.start();
+  it('broadcasts to correct session only', async () => {
+    server = new WsServer('tok');
+    await server.startStandalone(9874);
 
-    const ws = new WebSocket('ws://localhost:9873?token=tok');
-    await new Promise<void>((resolve) => { ws.on('open', resolve); });
+    const ws1 = new WebSocket('ws://localhost:9874/ws/session1?token=tok');
+    const ws2 = new WebSocket('ws://localhost:9874/ws/session2?token=tok');
+    await Promise.all([
+      new Promise<void>((r) => { ws1.on('open', r); }),
+      new Promise<void>((r) => { ws2.on('open', r); }),
+    ]);
 
-    const received: string[] = [];
-    ws.on('message', (data) => received.push(data.toString()));
+    const msgs1: string[] = [];
+    const msgs2: string[] = [];
+    ws1.on('message', (d) => msgs1.push(d.toString()));
+    ws2.on('message', (d) => msgs2.push(d.toString()));
 
-    server.broadcast(JSON.stringify({ type: 'output', data: 'hello' }));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    server.broadcastToSession('session1', '{"type":"output","data":"for-s1"}');
+    await new Promise((r) => setTimeout(r, 100));
 
-    expect(received.length).toBe(1);
-    expect(JSON.parse(received[0]).data).toBe('hello');
-    ws.close();
+    expect(msgs1.length).toBe(1);
+    expect(msgs2.length).toBe(0);
+    ws1.close();
+    ws2.close();
   });
 
-  it('emits input from client', async () => {
-    server = new WsServer(9874, 'tok');
-    await server.start();
+  it('emits input with session id', async () => {
+    server = new WsServer('tok');
+    await server.startStandalone(9875);
 
-    const inputs: string[] = [];
-    server.onInput((data) => inputs.push(data));
+    const inputs: Array<{ sid: string; data: string }> = [];
+    server.onInput((sid, data) => inputs.push({ sid, data }));
 
-    const ws = new WebSocket('ws://localhost:9874?token=tok');
-    await new Promise<void>((resolve) => { ws.on('open', resolve); });
+    const ws = new WebSocket('ws://localhost:9875/ws/mysession?token=tok');
+    await new Promise<void>((r) => { ws.on('open', r); });
 
-    ws.send(JSON.stringify({ type: 'input', data: 'ls\n' }));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    ws.send(JSON.stringify({ type: 'input', data: 'hello\n' }));
+    await new Promise((r) => setTimeout(r, 100));
 
-    expect(inputs).toContain('ls\n');
+    expect(inputs[0].sid).toBe('mysession');
+    expect(inputs[0].data).toBe('hello\n');
     ws.close();
   });
 });

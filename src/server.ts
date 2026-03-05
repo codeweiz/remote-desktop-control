@@ -3,19 +3,19 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { spawn as cpSpawn } from 'node:child_process';
-import { PtyManager } from './pty-manager.js';
+import { SessionManager } from './session-manager.js';
 import { WsServer } from './ws-server.js';
+import { NotificationManager } from './notification.js';
 import { FeishuBot } from './feishu.js';
+import { startTunnel, getTunnelConfig } from './tunnel.js';
 import { generateToken } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface ServerConfig {
-  command: string;
-  args: string[];
   port: number;
   tunnel?: boolean;
+  initialCommand?: { command: string; args: string[] };
   feishu?: {
     appId: string;
     appSecret: string;
@@ -36,30 +36,19 @@ function getLocalIP(): string {
   return 'localhost';
 }
 
+function wireSessionPty(sessionId: string, sessionManager: SessionManager, wsServer: WsServer, feishuBot: FeishuBot | null): void {
+  const pty = sessionManager.getPty(sessionId);
+  if (!pty) return;
+  pty.onData((data) => {
+    wsServer.broadcastToSession(sessionId, JSON.stringify({ type: 'output', data }));
+    feishuBot?.pushOutput(data);
+  });
+}
+
 export async function startServer(config: ServerConfig): Promise<void> {
   const token = generateToken();
-  const ptyManager = new PtyManager();
-
-  // HTTP server for serving web/index.html
-  const httpServer = http.createServer((_req, res) => {
-    const htmlPath = path.resolve(__dirname, '../web/index.html');
-    const html = fs.readFileSync(htmlPath, 'utf-8');
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(html);
-  });
-
-  // WebSocket server attached to HTTP server
-  const wsServer = new WsServer(config.port, token, httpServer);
-  await wsServer.start();
-
-  // Wire PTY output → WS broadcast
-  ptyManager.onData((data) => {
-    wsServer.broadcast(JSON.stringify({ type: 'output', data }));
-  });
-
-  // Wire WS input → PTY
-  wsServer.onInput((data) => ptyManager.write(data));
-  wsServer.onResize((cols, rows) => ptyManager.resize(cols, rows));
+  const sessionManager = new SessionManager();
+  const wsServer = new WsServer(token);
 
   // Feishu bot (optional)
   let feishuBot: FeishuBot | null = null;
@@ -67,13 +56,15 @@ export async function startServer(config: ServerConfig): Promise<void> {
     feishuBot = new FeishuBot(config.feishu);
     await feishuBot.init();
 
-    // Wire PTY output → Feishu
-    ptyManager.onData((data) => feishuBot!.pushOutput(data));
+    feishuBot.onInput((data) => {
+      const sessions = sessionManager.list();
+      const active = sessions.find(s => s.status === 'waiting-input') || sessions[0];
+      if (active) {
+        sessionManager.getPty(active.id)?.write(data);
+        sessionManager.markActive(active.id);
+      }
+    });
 
-    // Wire Feishu input → PTY
-    feishuBot.onInput((data) => ptyManager.write(data));
-
-    // Start Feishu webhook listener
     const feishuServer = http.createServer((req, res) => {
       if (req.method === 'POST') {
         let body = '';
@@ -81,16 +72,13 @@ export async function startServer(config: ServerConfig): Promise<void> {
         req.on('end', () => {
           try {
             const parsed = JSON.parse(body);
-            // Handle Feishu URL verification challenge
             if (parsed.challenge) {
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ challenge: parsed.challenge }));
               return;
             }
             feishuBot!.handleEvent(parsed);
-          } catch {
-            // ignore
-          }
+          } catch { /* ignore */ }
           res.writeHead(200);
           res.end('ok');
         });
@@ -101,69 +89,187 @@ export async function startServer(config: ServerConfig): Promise<void> {
     });
 
     feishuServer.listen(config.feishu.webhookPort, () => {
-      console.log(`Feishu webhook listening on port ${config.feishu!.webhookPort}`);
+      console.log(`  Feishu:       webhook on port ${config.feishu!.webhookPort}`);
     });
   }
 
-  // Start PTY
-  ptyManager.spawn(config.command, config.args);
-
-  ptyManager.onExit((code) => {
-    console.log(`Process exited with code ${code}`);
-    feishuBot?.destroy();
-    wsServer.close();
-    process.exit(code);
+  // Notification manager
+  const notificationManager = new NotificationManager({
+    onBrowserPush: (sessionId, event, message) => {
+      wsServer.broadcastAll(JSON.stringify({
+        type: 'notification',
+        sessionId,
+        event,
+        message,
+      }));
+    },
+    onFeishuPush: (sessionId, event, message) => {
+      const session = sessionManager.get(sessionId);
+      const name = session?.name || sessionId;
+      feishuBot?.pushOutput(`[${name}] ${event}: ${message}`);
+    },
   });
+
+  // Wire session events to notifications
+  sessionManager.onEvent((sessionId, event, data) => {
+    const session = sessionManager.get(sessionId);
+    const name = session?.name || sessionId;
+    if (event === 'waiting-input') {
+      const lastLine = (data as { lastLine: string })?.lastLine || '';
+      notificationManager.notify(sessionId, 'waiting-input', `[${name}] waiting for input: ${lastLine}`);
+    } else if (event === 'exited') {
+      const code = (data as { code: number })?.code ?? -1;
+      notificationManager.notify(sessionId, 'exited', `[${name}] process exited with code ${code}`);
+    }
+    wsServer.broadcastAll(JSON.stringify({
+      type: 'sessions-updated',
+      sessions: sessionManager.list(),
+    }));
+  });
+
+  // HTTP server
+  const httpServer = http.createServer((req, res) => {
+    const url = new URL(req.url || '', `http://localhost:${config.port}`);
+
+    // JSON API helper
+    const jsonResponse = (status: number, data: unknown) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data));
+    };
+
+    // API: list sessions
+    if (url.pathname === '/api/sessions' && req.method === 'GET') {
+      return jsonResponse(200, sessionManager.list());
+    }
+
+    // API: create session
+    if (url.pathname === '/api/sessions' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const { name, command, args: cmdArgs } = JSON.parse(body);
+          const session = sessionManager.create(name || command, command, cmdArgs || []);
+          wireSessionPty(session.id, sessionManager, wsServer, feishuBot);
+          jsonResponse(201, session);
+        } catch {
+          res.writeHead(400);
+          res.end('Invalid request');
+        }
+      });
+      return;
+    }
+
+    // API: delete session
+    const deleteMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9]+)$/);
+    if (deleteMatch && req.method === 'DELETE') {
+      sessionManager.remove(deleteMatch[1]);
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // API: get session buffer
+    if (url.pathname === '/api/sessions/buffer' && req.method === 'GET') {
+      const sessionId = url.searchParams.get('id');
+      if (sessionId) {
+        const pty = sessionManager.getPty(sessionId);
+        jsonResponse(200, { buffer: pty?.getBuffer() || '' });
+      } else {
+        res.writeHead(400);
+        res.end('Missing session id');
+      }
+      return;
+    }
+
+    // API: get notification settings
+    if (url.pathname === '/api/notifications' && req.method === 'GET') {
+      return jsonResponse(200, notificationManager.getChannelStatus());
+    }
+
+    // API: set notification settings
+    if (url.pathname === '/api/notifications' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const { channel, enabled } = JSON.parse(body);
+          notificationManager.setChannelEnabled(channel, enabled);
+          jsonResponse(200, notificationManager.getChannelStatus());
+        } catch {
+          res.writeHead(400);
+          res.end('Invalid request');
+        }
+      });
+      return;
+    }
+
+    // Serve static files
+    if (url.pathname === '/commands.json') {
+      const cmdPath = path.resolve(__dirname, '../web/commands.json');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(fs.readFileSync(cmdPath, 'utf-8'));
+      return;
+    }
+
+    if (url.pathname === '/sw.js') {
+      const swPath = path.resolve(__dirname, '../web/sw.js');
+      if (fs.existsSync(swPath)) {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' });
+        res.end(fs.readFileSync(swPath, 'utf-8'));
+        return;
+      }
+    }
+
+    // Serve index.html for everything else
+    const htmlPath = path.resolve(__dirname, '../web/index.html');
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(fs.readFileSync(htmlPath, 'utf-8'));
+  });
+
+  // Attach WebSocket
+  wsServer.attach(httpServer);
+
+  wsServer.onInput((sessionId, data) => {
+    sessionManager.getPty(sessionId)?.write(data);
+    sessionManager.markActive(sessionId);
+  });
+  wsServer.onResize((sessionId, cols, rows) => {
+    sessionManager.getPty(sessionId)?.resize(cols, rows);
+  });
+
+  // Start HTTP server
+  await new Promise<void>((resolve) => {
+    httpServer.listen(config.port, resolve);
+  });
+
+  // Create initial session if provided
+  if (config.initialCommand) {
+    const { command, args: cmdArgs } = config.initialCommand;
+    const session = sessionManager.create(command, command, cmdArgs);
+    wireSessionPty(session.id, sessionManager, wsServer, feishuBot);
+  }
 
   // Print access info
   const localIP = getLocalIP();
   console.log('');
-  console.log('Remote Terminal Bridge started!');
-  console.log(`  Web Terminal: http://${localIP}:${config.port}?token=${token}`);
+  console.log('Remote Terminal Bridge v2 started!');
+  console.log(`  Web Panel:    http://${localIP}:${config.port}?token=${token}`);
   console.log(`  Local:        http://localhost:${config.port}?token=${token}`);
-  if (feishuBot) {
-    console.log(`  Feishu:       connected`);
-  }
 
-  // Cloudflare Tunnel (optional)
   if (config.tunnel) {
-    startTunnel(config.port, token);
+    try {
+      const tunnelConfig = getTunnelConfig();
+      const result = await startTunnel(
+        tunnelConfig
+          ? { port: config.port, namedTunnel: tunnelConfig.name, hostname: tunnelConfig.hostname }
+          : { port: config.port }
+      );
+      console.log(`  Tunnel:       ${result.url}?token=${token}`);
+    } catch (err) {
+      console.error(`  Tunnel:       ${(err as Error).message}`);
+    }
   }
 
   console.log('');
-}
-
-function startTunnel(port: number, token: string): void {
-  const cf = cpSpawn('cloudflared', ['tunnel', '--url', `http://localhost:${port}`], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  let tunnelUrl = '';
-
-  const handleOutput = (data: Buffer) => {
-    const line = data.toString();
-    // cloudflared prints the URL to stderr
-    const match = line.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-    if (match && !tunnelUrl) {
-      tunnelUrl = match[0];
-      console.log(`  Tunnel:       ${tunnelUrl}?token=${token}`);
-    }
-  };
-
-  cf.stdout.on('data', handleOutput);
-  cf.stderr.on('data', handleOutput);
-
-  cf.on('error', (err) => {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      console.error('  Tunnel:       cloudflared not found. Install: brew install cloudflared');
-    } else {
-      console.error('  Tunnel:       failed to start:', err.message);
-    }
-  });
-
-  cf.on('exit', (code) => {
-    if (code !== null && code !== 0) {
-      console.error(`  Tunnel exited with code ${code}`);
-    }
-  });
 }
