@@ -15,6 +15,10 @@ export default function TabsLayout() {
         options={{ title: 'Sessions' }}
       />
       <Tabs.Screen
+        name="terminal"
+        options={{ title: 'Terminal', tabBarLabel: 'Terminal' }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{ title: 'Settings' }}
       />
