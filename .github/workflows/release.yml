@@ -18,16 +18,12 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            target: node18-linux-x64
             artifact: rtb-linux-x64
           - os: ubuntu-24.04-arm
-            target: node18-linux-arm64
             artifact: rtb-linux-arm64
           - os: macos-13
-            target: node18-macos-x64
             artifact: rtb-darwin-x64
           - os: macos-14
-            target: node18-macos-arm64
             artifact: rtb-darwin-arm64
 
     runs-on: ${{ matrix.os }}
@@ -37,21 +33,22 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
           cache: npm
 
       - run: npm ci
 
-      - name: Build TypeScript
-        run: npm run build
+      - name: Build binary (esbuild + Node.js SEA)
+        run: node build-binary.mjs
 
-      - name: Build binary
-        run: npx pkg . --target ${{ matrix.target }} --output release/rtb --compress GZip
+      - name: Smoke test
+        run: ./release/rtb config || true
 
       - name: Package
         run: |
           cd release
-          tar czf ${{ matrix.artifact }}.tar.gz rtb
+          cp ../node_modules/node-pty/build/Release/pty.node . 2>/dev/null || true
+          tar czf ${{ matrix.artifact }}.tar.gz rtb pty.node 2>/dev/null || tar czf ${{ matrix.artifact }}.tar.gz rtb
           ls -lh ${{ matrix.artifact }}.tar.gz
 
       - uses: actions/upload-artifact@v4
