@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Remote Terminal</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; background: #1e1e1e; overflow: hidden; }
+    #terminal { height: 100%; width: 100%; }
+    #status {
+      position: fixed; top: 8px; right: 8px; z-index: 10;
+      padding: 4px 10px; border-radius: 4px; font-size: 12px;
+      font-family: monospace; color: #fff;
+    }
+    .connected { background: #2ea043; }
+    .disconnected { background: #da3633; }
+    .connecting { background: #d29922; }
+  </style>
+</head>
+<body>
+  <div id="status" class="connecting">connecting...</div>
+  <div id="terminal"></div>
+
+  <script type="module">
+    import { Terminal } from 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5/+esm';
+    import { FitAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/+esm';
+    import { WebLinksAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0/+esm';
+
+    const params = new URLSearchParams(location.search);
+    const token = params.get('token');
+    const statusEl = document.getElementById('status');
+
+    const term = new Terminal({
+      cursorBlink: true,
+      fontSize: 14,
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      theme: {
+        background: '#1e1e1e',
+        foreground: '#d4d4d4',
+      },
+    });
+
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.loadAddon(new WebLinksAddon());
+    term.open(document.getElementById('terminal'));
+    fitAddon.fit();
+
+    function connect() {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${protocol}//${location.host}/ws?token=${token}`);
+
+      ws.onopen = () => {
+        statusEl.textContent = 'connected';
+        statusEl.className = 'connected';
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'output') {
+          term.write(msg.data);
+        }
+      };
+
+      ws.onclose = () => {
+        statusEl.textContent = 'disconnected - reconnecting...';
+        statusEl.className = 'disconnected';
+        setTimeout(connect, 2000);
+      };
+
+      ws.onerror = () => ws.close();
+
+      term.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input', data }));
+        }
+      });
+
+      term.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        }
+      });
+    }
+
+    window.addEventListener('resize', () => fitAddon.fit());
+    connect();
+  </script>
+</body>
+</html>
