@@ -1,4 +1,4 @@
-.PHONY: help install build dev test test-watch clean \
+.PHONY: help install build build-binary dev test test-watch clean \
        start start-tunnel start-claude config config-set tunnel-setup \
        mobile-install mobile-start mobile-ios mobile-android mobile-web \
        mobile-build-dev mobile-build-preview mobile-build-prod
@@ -14,6 +14,9 @@ install: ## Install server dependencies
 
 build: ## Build TypeScript to dist/
 	npm run build
+
+build-binary: ## Build standalone binary for current platform
+	npm run build:binary
 
 dev: ## Start server in dev mode (tsx, auto-reload)
 	npm run dev -- start
