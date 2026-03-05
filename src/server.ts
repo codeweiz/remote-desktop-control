@@ -9,6 +9,7 @@ import { NotificationManager } from './notification.js';
 import { FeishuBot, FeishuSessionAdapter } from './feishu.js';
 import { startTunnel, getTunnelConfig } from './tunnel.js';
 import { generateToken } from './auth.js';
+import QRCode from 'qrcode-terminal';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -272,11 +273,13 @@ export async function startServer(config: ServerConfig): Promise<void> {
 
   // Print access info
   const localIP = getLocalIP();
+  const localUrl = `http://${localIP}:${config.port}?token=${token}`;
   console.log('');
   console.log('Remote Terminal Bridge v2 started!');
-  console.log(`  Web Panel:    http://${localIP}:${config.port}?token=${token}`);
+  console.log(`  Web Panel:    ${localUrl}`);
   console.log(`  Local:        http://localhost:${config.port}?token=${token}`);
 
+  let tunnelUrl: string | null = null;
   if (config.tunnel) {
     try {
       const tunnelConfig = getTunnelConfig();
@@ -285,7 +288,8 @@ export async function startServer(config: ServerConfig): Promise<void> {
           ? { port: config.port, namedTunnel: tunnelConfig.name, hostname: tunnelConfig.hostname }
           : { port: config.port }
       );
-      console.log(`  Tunnel:       ${result.url}?token=${token}`);
+      tunnelUrl = `${result.url}?token=${token}`;
+      console.log(`  Tunnel:       ${tunnelUrl}`);
     } catch (err) {
       console.error(`  Tunnel:       ${(err as Error).message}`);
     }
@@ -294,5 +298,16 @@ export async function startServer(config: ServerConfig): Promise<void> {
     console.log(`  Feishu:       connected (long connection)`);
   }
 
+  // QR code for mobile app connection
+  const qrAddress = tunnelUrl ? new URL(tunnelUrl).host : `${localIP}:${config.port}`;
+  const qrSSL = tunnelUrl ? '1' : '0';
+  const mobileLink = `rtb://connect?address=${encodeURIComponent(qrAddress)}&token=${encodeURIComponent(token)}&ssl=${qrSSL}`;
   console.log('');
+  console.log('  Mobile: scan QR code to connect');
+  QRCode.generate(mobileLink, { small: true }, (code: string) => {
+    for (const line of code.split('\n')) {
+      console.log(`  ${line}`);
+    }
+    console.log('');
+  });
 }
