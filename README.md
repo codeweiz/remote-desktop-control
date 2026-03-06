@@ -32,11 +32,8 @@
 从 [GitHub Releases](https://github.com/codeweiz/remote-desktop-control/releases) 下载对应平台的文件，解压即可运行，无需安装 Node.js：
 
 ```bash
-# macOS Apple Silicon (M1/M2/M3/M4)
+# macOS (Apple Silicon & Intel，Intel 通过 Rosetta 2 兼容)
 curl -fsSL https://github.com/codeweiz/remote-desktop-control/releases/latest/download/rtb-darwin-arm64.tar.gz | tar xz
-
-# macOS Intel
-curl -fsSL https://github.com/codeweiz/remote-desktop-control/releases/latest/download/rtb-darwin-x64.tar.gz | tar xz
 
 # Linux x64
 curl -fsSL https://github.com/codeweiz/remote-desktop-control/releases/latest/download/rtb-linux-x64.tar.gz | tar xz

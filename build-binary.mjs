@@ -28,19 +28,25 @@ if (require("node:module").isBuiltin === void 0 || require("node:sea") !== void 
 `.trim();
 let bundle = readFileSync('dist/rtb-bundle.cjs', 'utf-8');
 
-// Patch node-pty's loadNativeModule: extract pty.node from SEA asset at runtime
+// Patch node-pty's loadNativeModule: extract pty.node + spawn-helper from SEA asset at runtime
 const oldLoader = 'function loadNativeModule(name) {';
 const newLoader = `function loadNativeModule(name) {
-      // SEA: extract embedded pty.node to cache dir, then dlopen it
+      // SEA: extract embedded native files to cache dir, then dlopen
       try {
         var sea = require("node:sea");
         if (sea.isSea()) {
           var fs = require("fs"), path = require("path"), os = require("os");
           var cacheDir = path.join(os.homedir(), ".rtb", "native", process.platform + "-" + process.arch);
           fs.mkdirSync(cacheDir, { recursive: true });
+          // Extract pty.node
           var cached = path.join(cacheDir, name + ".node");
-          var raw = sea.getRawAsset(name + ".node");
-          fs.writeFileSync(cached, Buffer.from(raw));
+          fs.writeFileSync(cached, Buffer.from(sea.getRawAsset(name + ".node")));
+          // Extract spawn-helper (required by node-pty on unix)
+          try {
+            var helperPath = path.join(cacheDir, "spawn-helper");
+            fs.writeFileSync(helperPath, Buffer.from(sea.getRawAsset("spawn-helper")));
+            fs.chmodSync(helperPath, 0o755);
+          } catch(_h) {}
           return { dir: cacheDir + "/", module: require(cached) };
         }
       } catch(_e) {}
@@ -66,7 +72,18 @@ if (existsSync(prebuildPty)) {
 }
 console.log(`Using pty.node from: ${ptyNodePath}`);
 
-// Step 3: Create SEA config with pty.node + web assets embedded
+// Also locate spawn-helper (required by node-pty on unix)
+const spawnHelperPath = ptyNodePath.replace('pty.node', 'spawn-helper');
+const buildSpawnHelper = join(nodePtyDir, 'build', 'Release', 'spawn-helper');
+const spawnHelper = existsSync(spawnHelperPath) ? spawnHelperPath
+  : existsSync(buildSpawnHelper) ? buildSpawnHelper : null;
+if (spawnHelper) {
+  console.log(`Using spawn-helper from: ${spawnHelper}`);
+} else {
+  console.warn('Warning: spawn-helper not found — PTY may not work on this platform');
+}
+
+// Step 3: Create SEA config with native files + web assets embedded
 console.log('Step 2: Creating SEA blob...');
 const seaConfig = {
   main: 'dist/rtb-bundle.cjs',
@@ -76,6 +93,7 @@ const seaConfig = {
   useCodeCache: true,
   assets: {
     'pty.node': ptyNodePath,
+    ...(spawnHelper ? { 'spawn-helper': spawnHelper } : {}),
   },
 };
 const webFiles = ['web/index.html', 'web/commands.json', 'web/sw.js'];
