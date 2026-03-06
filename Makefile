@@ -1,6 +1,7 @@
 .PHONY: help install build build-binary dev test test-watch clean \
        start start-tunnel start-claude config config-set tunnel-setup \
        mobile-install mobile-start mobile-ios mobile-android mobile-web \
+       mobile-release-ios mobile-release-android \
        mobile-build-dev mobile-build-preview mobile-build-prod
 
 # ── Default ──────────────────────────────────────────────────
@@ -59,6 +60,12 @@ mobile-ios: ## Run on iOS simulator
 
 mobile-android: ## Run on Android emulator
 	cd mobile && npx expo run:android
+
+mobile-release-ios: ## Build release iOS app and install to device
+	cd mobile && npx expo run:ios --configuration Release --device
+
+mobile-release-android: ## Build release Android app
+	cd mobile && npx expo run:android --variant release
 
 mobile-web: ## Run in web browser
 	cd mobile && npx expo start --web

@@ -31,7 +31,6 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-notifications",
       "expo-router",
       [
         "expo-camera",
