@@ -13,7 +13,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # ── 服务端二进制构建 ──────────────────────────────────────
+  build-server:
     strategy:
       matrix:
         include:
@@ -54,8 +55,47 @@ jobs:
           name: ${{ matrix.artifact }}
           path: release/${{ matrix.artifact }}.tar.gz
 
+  # ── Android APK 构建 ─────────────────────────────────────
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: cd mobile && npm ci
+
+      - name: Generate native project
+        run: cd mobile && npx expo prebuild --platform android --clean
+
+      - name: Build Release APK
+        run: |
+          cd mobile/android
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Collect APK
+        run: |
+          mkdir -p release
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk release/rtb-mobile.apk
+          ls -lh release/rtb-mobile.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rtb-mobile-android
+          path: release/rtb-mobile.apk
+
+  # ── 发布到 GitHub Releases ───────────────────────────────
   release:
-    needs: build
+    needs: [build-server, build-android]
     if: always() && !cancelled()
     runs-on: ubuntu-latest
 
@@ -66,6 +106,9 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh artifacts/
 
       - name: Determine version
         id: version
@@ -82,4 +125,6 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: RTB ${{ steps.version.outputs.tag }}
           generate_release_notes: true
-          files: artifacts/*.tar.gz
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.apk
