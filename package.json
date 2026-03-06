@@ -1,8 +1,28 @@
 {
   "name": "remote-terminal-bridge",
   "version": "0.1.0",
-  "description": "Remote terminal bridge with WebSocket and Feishu integration",
+  "description": "Access and manage terminal sessions remotely via web browser, mobile app, or Feishu bot. Single binary, zero dependencies.",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/codeweiz/remote-desktop-control.git"
+  },
+  "keywords": [
+    "terminal",
+    "remote-terminal",
+    "web-terminal",
+    "xterm",
+    "pty",
+    "websocket",
+    "cloudflare-tunnel",
+    "feishu",
+    "lark",
+    "mobile",
+    "expo",
+    "react-native",
+    "session-manager"
+  ],
   "bin": {
     "rtb": "./dist/cli.js"
   },

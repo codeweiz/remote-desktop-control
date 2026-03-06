@@ -124,6 +124,58 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: RTB ${{ steps.version.outputs.tag }}
           generate_release_notes: true
+          body: |
+            ## RTB — Remote Terminal Bridge
+
+            Access and manage terminal sessions from anywhere — via web browser, mobile app, or Feishu bot.
+
+            ### Downloads
+
+            | Platform | File | Note |
+            |----------|------|------|
+            | macOS (ARM64) | `rtb-darwin-arm64.tar.gz` | Apple Silicon (M1/M2/M3/M4), Intel via Rosetta 2 |
+            | Linux x64 | `rtb-linux-x64.tar.gz` | Most servers and desktops |
+            | Linux ARM64 | `rtb-linux-arm64.tar.gz` | Raspberry Pi, ARM servers |
+            | Android | `rtb-mobile.apk` | Mobile app |
+
+            ### Quick Start
+
+            ```bash
+            # Download and extract (example: macOS)
+            curl -fsSL https://github.com/codeweiz/remote-desktop-control/releases/download/${{ steps.version.outputs.tag }}/rtb-darwin-arm64.tar.gz | tar xz
+
+            # Start
+            ./rtb start
+            ```
+
+            Open the printed URL in your browser, or scan the QR code with the mobile app.
+
+            ---
+
+            ## RTB — 远程终端桥接工具
+
+            通过 Web 浏览器、手机 App 或飞书机器人随时随地访问和管理终端会话。
+
+            ### 下载说明
+
+            | 平台 | 文件 | 说明 |
+            |------|------|------|
+            | macOS (ARM64) | `rtb-darwin-arm64.tar.gz` | Apple Silicon (M1/M2/M3/M4)，Intel 通过 Rosetta 2 兼容 |
+            | Linux x64 | `rtb-linux-x64.tar.gz` | 大多数服务器和桌面系统 |
+            | Linux ARM64 | `rtb-linux-arm64.tar.gz` | 树莓派、ARM 服务器 |
+            | Android | `rtb-mobile.apk` | 手机客户端 |
+
+            ### 快速开始
+
+            ```bash
+            # 下载并解压（以 macOS 为例）
+            curl -fsSL https://github.com/codeweiz/remote-desktop-control/releases/download/${{ steps.version.outputs.tag }}/rtb-darwin-arm64.tar.gz | tar xz
+
+            # 启动
+            ./rtb start
+            ```
+
+            在浏览器中打开输出的 URL，或用手机 App 扫描终端中的二维码即可连接。
           files: |
             artifacts/*.tar.gz
             artifacts/*.apk
