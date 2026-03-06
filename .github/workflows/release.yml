@@ -46,8 +46,7 @@ jobs:
       - name: Package
         run: |
           cd release
-          cp ../node_modules/node-pty/build/Release/pty.node . 2>/dev/null || true
-          tar czf ${{ matrix.artifact }}.tar.gz rtb pty.node 2>/dev/null || tar czf ${{ matrix.artifact }}.tar.gz rtb
+          tar czf ${{ matrix.artifact }}.tar.gz rtb
           ls -lh ${{ matrix.artifact }}.tar.gz
 
       - uses: actions/upload-artifact@v4

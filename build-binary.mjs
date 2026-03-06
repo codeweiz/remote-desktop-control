@@ -1,27 +1,23 @@
 #!/usr/bin/env node
 // Build a standalone binary using esbuild (bundle) + Node.js SEA (Single Executable Application)
-// This approach works on macOS with code signing (unlike pkg)
+// Everything (JS + native pty.node + web assets) is embedded into a single executable.
 
 import { execSync } from 'node:child_process';
 import { writeFileSync, readFileSync, copyFileSync, mkdirSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 mkdirSync('release', { recursive: true });
 
 // Step 1: Bundle with esbuild into single CJS file
-// node-pty must be external — it's a native module loaded at runtime
 console.log('Step 1: Bundling with esbuild...');
 execSync(
   'npx esbuild src/cli.ts --bundle --platform=node --format=cjs ' +
   '--outfile=dist/rtb-bundle.cjs ' +
-  '--external:node-pty ' +
-  '--external:@larksuiteoapi/node-sdk ' +
   '--define:import.meta.url=__import_meta_url',
   { stdio: 'inherit' }
 );
 
 // Prepend banner: shims for SEA environment
-// 1. import.meta.url shim for __dirname resolution
-// 2. Override require() to use module.createRequire() so native modules load from disk
 const banner = `
 var __import_meta_url = typeof document === "undefined" ? require("url").pathToFileURL(__filename || process.execPath).href : "";
 if (require("node:module").isBuiltin === void 0 || require("node:sea") !== void 0) {
@@ -30,10 +26,47 @@ if (require("node:module").isBuiltin === void 0 || require("node:sea") !== void 
   require.main = _origRequire.main;
 }
 `.trim();
-const bundle = readFileSync('dist/rtb-bundle.cjs', 'utf-8');
+let bundle = readFileSync('dist/rtb-bundle.cjs', 'utf-8');
+
+// Patch node-pty's loadNativeModule: extract pty.node from SEA asset at runtime
+const oldLoader = 'function loadNativeModule(name) {';
+const newLoader = `function loadNativeModule(name) {
+      // SEA: extract embedded pty.node to cache dir, then dlopen it
+      try {
+        var sea = require("node:sea");
+        if (sea.isSea()) {
+          var fs = require("fs"), path = require("path"), os = require("os");
+          var cacheDir = path.join(os.homedir(), ".rtb", "native", process.platform + "-" + process.arch);
+          fs.mkdirSync(cacheDir, { recursive: true });
+          var cached = path.join(cacheDir, name + ".node");
+          var raw = sea.getRawAsset(name + ".node");
+          fs.writeFileSync(cached, Buffer.from(raw));
+          return { dir: cacheDir + "/", module: require(cached) };
+        }
+      } catch(_e) {}
+      // Non-SEA fallback (dev mode):`;
+if (!bundle.includes(oldLoader)) {
+  throw new Error('Could not find loadNativeModule in bundle — node-pty API may have changed');
+}
+bundle = bundle.replace(oldLoader, newLoader);
+
 writeFileSync('dist/rtb-bundle.cjs', banner + '\n' + bundle);
 
-// Step 2: Create SEA config
+// Step 2: Locate platform-specific pty.node for embedding
+const nodePtyDir = 'node_modules/node-pty';
+const prebuildPty = join(nodePtyDir, 'prebuilds', `${process.platform}-${process.arch}`, 'pty.node');
+const buildReleasePty = join(nodePtyDir, 'build', 'Release', 'pty.node');
+let ptyNodePath;
+if (existsSync(prebuildPty)) {
+  ptyNodePath = prebuildPty;
+} else if (existsSync(buildReleasePty)) {
+  ptyNodePath = buildReleasePty;
+} else {
+  throw new Error('pty.node not found — cannot build standalone binary');
+}
+console.log(`Using pty.node from: ${ptyNodePath}`);
+
+// Step 3: Create SEA config with pty.node + web assets embedded
 console.log('Step 2: Creating SEA blob...');
 const seaConfig = {
   main: 'dist/rtb-bundle.cjs',
@@ -41,32 +74,28 @@ const seaConfig = {
   disableExperimentalSEAWarning: true,
   useSnapshot: false,
   useCodeCache: true,
-  assets: {},
+  assets: {
+    'pty.node': ptyNodePath,
+  },
 };
-
-// Include web assets in SEA
 const webFiles = ['web/index.html', 'web/commands.json', 'web/sw.js'];
 for (const f of webFiles) {
-  if (existsSync(f)) {
-    seaConfig.assets[f] = f;
-  }
+  if (existsSync(f)) seaConfig.assets[f] = f;
 }
 
 writeFileSync('dist/sea-config.json', JSON.stringify(seaConfig, null, 2));
 execSync('node --experimental-sea-config dist/sea-config.json', { stdio: 'inherit' });
 
-// Step 3: Create the executable
+// Step 4: Create the executable
 console.log('Step 3: Creating executable...');
 const nodeBin = process.execPath;
 const outputBin = 'release/rtb';
 copyFileSync(nodeBin, outputBin);
 
-// Remove signature on macOS (required before injecting blob)
 if (process.platform === 'darwin') {
   execSync(`codesign --remove-signature ${outputBin}`, { stdio: 'inherit' });
 }
 
-// Inject the SEA blob
 execSync(
   `npx postject ${outputBin} NODE_SEA_BLOB dist/sea-prep.blob ` +
   '--sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 ' +
@@ -74,9 +103,13 @@ execSync(
   { stdio: 'inherit' }
 );
 
-// Re-sign on macOS
 if (process.platform === 'darwin') {
   execSync(`codesign --sign - ${outputBin}`, { stdio: 'inherit' });
 }
 
-console.log('Done! Binary at release/rtb');
+// Clean up stale release artifacts
+for (const f of ['release/pty.node', 'release/node_modules']) {
+  execSync(`rm -rf ${f}`, { stdio: 'inherit' });
+}
+
+console.log('Done! Single binary at release/rtb');

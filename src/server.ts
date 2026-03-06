@@ -13,6 +13,21 @@ import QRCode from 'qrcode-terminal';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** Read a web asset — from SEA embedded assets first, fallback to disk */
+function readWebAsset(relativePath: string): string | null {
+  try {
+    const sea = require('node:sea');
+    if (sea.isSea() && sea.getAsset) {
+      return sea.getAsset(relativePath, 'utf-8');
+    }
+  } catch {}
+  const diskPath = path.resolve(__dirname, '..', relativePath);
+  if (fs.existsSync(diskPath)) {
+    return fs.readFileSync(diskPath, 'utf-8');
+  }
+  return null;
+}
+
 export interface ServerConfig {
   port: number;
   tunnel?: boolean;
@@ -225,25 +240,32 @@ export async function startServer(config: ServerConfig): Promise<void> {
 
     // Serve static files
     if (url.pathname === '/commands.json') {
-      const cmdPath = path.resolve(__dirname, '../web/commands.json');
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(fs.readFileSync(cmdPath, 'utf-8'));
-      return;
+      const content = readWebAsset('web/commands.json');
+      if (content) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(content);
+        return;
+      }
     }
 
     if (url.pathname === '/sw.js') {
-      const swPath = path.resolve(__dirname, '../web/sw.js');
-      if (fs.existsSync(swPath)) {
+      const content = readWebAsset('web/sw.js');
+      if (content) {
         res.writeHead(200, { 'Content-Type': 'application/javascript' });
-        res.end(fs.readFileSync(swPath, 'utf-8'));
+        res.end(content);
         return;
       }
     }
 
     // Serve index.html for everything else
-    const htmlPath = path.resolve(__dirname, '../web/index.html');
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(fs.readFileSync(htmlPath, 'utf-8'));
+    const html = readWebAsset('web/index.html');
+    if (html) {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(html);
+    } else {
+      res.writeHead(500);
+      res.end('web/index.html not found');
+    }
   });
 
   // Attach WebSocket
