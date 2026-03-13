@@ -122,7 +122,7 @@ execSync(
 );
 
 if (process.platform === 'darwin') {
-  execSync(`codesign --sign - ${outputBin}`, { stdio: 'inherit' });
+  execSync(`codesign --sign - --entitlements entitlements.plist --force ${outputBin}`, { stdio: 'inherit' });
 }
 
 // Clean up stale release artifacts
