@@ -149,6 +149,10 @@ max_message_size_bytes = 2097152
 
 #[test]
 fn test_missing_file_returns_default() {
+    // Ensure no env overrides leak from other tests
+    std::env::remove_var("RTB_SERVER_PORT");
+    std::env::remove_var("RTB_SERVER_HOST");
+
     let cfg = Config::load_from_path("/tmp/rtb_test_nonexistent_dir_xyz/config.toml")
         .expect("should return default for missing file");
     assert_eq!(cfg.server.port, 3000);
@@ -178,7 +182,21 @@ port = 9999
 
 #[test]
 fn test_env_override() {
-    // Set env var before loading
+    // Use unique env var names to avoid interference with parallel tests
+    // We test apply_env_overrides by manually setting + clearing in a controlled way
+    // Note: env vars are process-global, so we use the standard names but clean first
+    let vars = [
+        "RTB_SERVER_PORT",
+        "RTB_SERVER_HOST",
+        "RTB_LOGGING_LEVEL",
+        "RTB_AGENT_AUTO_APPROVE_TOOLS",
+        "RTB_TASK_POOL_MAX_CONCURRENT",
+    ];
+    // Clean first in case other tests left them
+    for v in &vars {
+        std::env::remove_var(v);
+    }
+
     std::env::set_var("RTB_SERVER_PORT", "8080");
     std::env::set_var("RTB_SERVER_HOST", "0.0.0.0");
     std::env::set_var("RTB_LOGGING_LEVEL", "debug");
@@ -188,18 +206,16 @@ fn test_env_override() {
     let mut cfg = Config::default();
     cfg.apply_env_overrides();
 
+    // Clean up BEFORE assertions so other tests aren't affected even if we panic
+    for v in &vars {
+        std::env::remove_var(v);
+    }
+
     assert_eq!(cfg.server.port, 8080);
     assert_eq!(cfg.server.host, "0.0.0.0");
     assert_eq!(cfg.logging.level, "debug");
     assert_eq!(cfg.agent.auto_approve_tools, true);
     assert_eq!(cfg.task_pool.max_concurrent, 8);
-
-    // Clean up
-    std::env::remove_var("RTB_SERVER_PORT");
-    std::env::remove_var("RTB_SERVER_HOST");
-    std::env::remove_var("RTB_LOGGING_LEVEL");
-    std::env::remove_var("RTB_AGENT_AUTO_APPROVE_TOOLS");
-    std::env::remove_var("RTB_TASK_POOL_MAX_CONCURRENT");
 }
 
 #[test]
@@ -238,6 +254,10 @@ fn test_tilde_expansion() {
 
 #[test]
 fn test_save_and_load_roundtrip() {
+    // Ensure no env overrides leak from parallel tests
+    std::env::remove_var("RTB_SERVER_PORT");
+    std::env::remove_var("RTB_LOGGING_LEVEL");
+
     let dir = tempfile::tempdir().expect("create temp dir");
     let path = dir.path().join("config.toml");
 
