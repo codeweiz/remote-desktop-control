@@ -11,7 +11,7 @@ use crate::{
     auth::auth_middleware,
     security::security_headers,
     state::AppState,
-    static_files::static_fallback,
+    static_files::static_handler,
     ws,
 };
 
@@ -68,8 +68,8 @@ pub fn create_router(state: AppState) -> Router {
         .merge(authed_api)
         // WebSocket routes (self-authenticated)
         .merge(ws_routes)
-        // Fallback: static files (placeholder)
-        .fallback(static_fallback)
+        // Fallback: embedded frontend static files (SPA)
+        .fallback(static_handler)
         // Security headers on every response
         .layer(middleware::from_fn(security_headers))
         .with_state(state)

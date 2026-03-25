@@ -1961,6 +1961,7 @@ dependencies = [
  "axum-extra",
  "base64",
  "futures-util",
+ "mime_guess",
  "rtb-core",
  "rust-embed",
  "serde",
