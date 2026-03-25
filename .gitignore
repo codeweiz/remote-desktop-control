@@ -30,3 +30,4 @@ dist-ssr
 # Binary releases
 release/
 pkg-entry.json
+.superpowers
