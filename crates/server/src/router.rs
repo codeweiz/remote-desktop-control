@@ -38,30 +38,36 @@ fn api_routes() -> Router<AppState> {
 ///
 /// Layout:
 /// - `/health` — public health check
-/// - `/api/v1/*` — authenticated REST API
-/// - `/ws/*` — WebSocket endpoints (placeholders)
+/// - `/api/v1/*` — authenticated REST API (auth middleware)
+/// - `/ws/*` — WebSocket endpoints (self-authenticated via query token)
 /// - fallback — static file serving (placeholder)
 ///
 /// Middleware applied (outermost first):
 /// - Security headers (all responses)
-/// - Auth (API + WS routes only)
+/// - Auth (API routes only; WS routes validate tokens themselves)
 pub fn create_router(state: AppState) -> Router {
-    // Routes that require authentication
-    let authed = Router::new()
+    // REST API routes that require auth middleware
+    let authed_api = Router::new()
         .nest("/api/v1", api_routes())
-        .route("/ws/terminal", get(ws::ws_terminal_placeholder))
-        .route("/ws/agent", get(ws::ws_agent_placeholder))
-        .route("/ws/status", get(ws::ws_status_placeholder))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
         ));
 
+    // WebSocket routes handle their own token validation via query params,
+    // so they bypass the auth middleware (which would redirect on token= queries).
+    let ws_routes = Router::new()
+        .route("/ws/terminal", get(ws::ws_terminal))
+        .route("/ws/agent", get(ws::ws_agent_placeholder))
+        .route("/ws/status", get(ws::ws_status));
+
     Router::new()
         // Public routes
         .route("/health", get(health))
-        // Authenticated routes
-        .merge(authed)
+        // Authenticated REST API
+        .merge(authed_api)
+        // WebSocket routes (self-authenticated)
+        .merge(ws_routes)
         // Fallback: static files (placeholder)
         .fallback(static_fallback)
         // Security headers on every response

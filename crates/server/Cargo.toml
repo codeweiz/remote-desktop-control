@@ -20,3 +20,5 @@ tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
 tower_governor = "0.5"
 rust-embed = "8"
 tokio-tungstenite = "0.26"
+base64 = "0.22"
+futures-util = "0.3"
