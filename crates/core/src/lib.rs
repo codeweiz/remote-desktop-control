@@ -5,3 +5,5 @@
 // other crates in the workspace.
 
 pub mod config;
+pub mod event_bus;
+pub mod events;
