@@ -4,11 +4,14 @@
 // session management, and foundational abstractions used by all
 // other crates in the workspace.
 
+pub mod agent;
 pub mod config;
 pub mod event_bus;
 pub mod events;
+pub mod notification;
 pub mod pty;
 pub mod session;
+pub mod task_pool;
 
 use std::sync::Arc;
 
