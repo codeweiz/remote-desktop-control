@@ -3,3 +3,5 @@
 // Provides shared types, configuration management, PTY handling,
 // session management, and foundational abstractions used by all
 // other crates in the workspace.
+
+pub mod config;

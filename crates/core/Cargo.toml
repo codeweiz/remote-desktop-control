@@ -19,3 +19,6 @@ portable-pty = "0.8"
 toml = "0.8"
 dirs = "6"
 notify = "7"
+
+[dev-dependencies]
+tempfile = "3"
