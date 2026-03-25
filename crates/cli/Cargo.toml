@@ -1,0 +1,17 @@
+[package]
+name = "rtb-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rtb-core = { path = "../core" }
+rtb-server = { path = "../server" }
+rtb-plugin-host = { path = "../plugin-host" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+clap = { version = "4", features = ["derive"] }
+qrcode = "0.14"

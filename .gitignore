@@ -27,6 +27,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# Rust
+target/
+
 # Binary releases
 release/
 pkg-entry.json
