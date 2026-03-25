@@ -3,179 +3,49 @@ name: Release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g. 0.1.0)'
-        required: true
 
 permissions:
   contents: write
 
 jobs:
-  # ── 服务端二进制构建 ──────────────────────────────────────
-  build-server:
+  build:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            artifact: rtb-linux-x64
-          - os: ubuntu-24.04-arm
-            artifact: rtb-linux-arm64
-          - os: macos-latest
-            artifact: rtb-darwin-arm64
-
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: rtb-linux-x64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: rtb-linux-arm64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: rtb-darwin-arm64
     runs-on: ${{ matrix.os }}
-
     steps:
       - uses: actions/checkout@v4
-
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-
-      - name: Build binary (esbuild + Node.js SEA)
-        run: node build-binary.mjs
-
-      - name: Smoke test
-        run: ./release/rtb config || true
-
+          node-version: '22'
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+      - name: Build frontend
+        run: cd web && npm ci && npm run build
+      - name: Build binary
+        run: cargo build --release --target ${{ matrix.target }} -p rtb-cli
       - name: Package
         run: |
-          cd release
-          tar czf ${{ matrix.artifact }}.tar.gz rtb
-          ls -lh ${{ matrix.artifact }}.tar.gz
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: release/${{ matrix.artifact }}.tar.gz
-
-  # ── Android APK 构建 ─────────────────────────────────────
-  build-android:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Install dependencies
-        run: cd mobile && npm ci
-
-      - name: Generate native project
-        run: cd mobile && npx expo prebuild --platform android --clean
-
-      - name: Build Release APK
-        run: |
-          cd mobile/android
-          ./gradlew assembleRelease --no-daemon
-
-      - name: Collect APK
-        run: |
           mkdir -p release
-          cp mobile/android/app/build/outputs/apk/release/app-release.apk release/rtb-mobile.apk
-          ls -lh release/rtb-mobile.apk
-
-      - uses: actions/upload-artifact@v4
+          cp target/${{ matrix.target }}/release/rtb-cli release/${{ matrix.name }}
+          cd release && tar czf ${{ matrix.name }}.tar.gz ${{ matrix.name }}
+      - uses: softprops/action-gh-release@v2
         with:
-          name: rtb-mobile-android
-          path: release/rtb-mobile.apk
-
-  # ── 发布到 GitHub Releases ───────────────────────────────
-  release:
-    needs: [build-server, build-android]
-    if: always() && !cancelled()
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: List artifacts
-        run: ls -lh artifacts/
-
-      - name: Determine version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: RTB ${{ steps.version.outputs.tag }}
-          generate_release_notes: true
-          body: |
-            ## RTB — Remote Terminal Bridge
-
-            Access and manage terminal sessions from anywhere — via web browser, mobile app, or Feishu bot.
-
-            ### Downloads
-
-            | Platform | File | Note |
-            |----------|------|------|
-            | macOS (ARM64) | `rtb-darwin-arm64.tar.gz` | Apple Silicon (M1/M2/M3/M4), Intel via Rosetta 2 |
-            | Linux x64 | `rtb-linux-x64.tar.gz` | Most servers and desktops |
-            | Linux ARM64 | `rtb-linux-arm64.tar.gz` | Raspberry Pi, ARM servers |
-            | Android | `rtb-mobile.apk` | Mobile app |
-
-            ### Quick Start
-
-            ```bash
-            # Download and extract (example: macOS)
-            curl -fsSL https://github.com/codeweiz/remote-desktop-control/releases/download/${{ steps.version.outputs.tag }}/rtb-darwin-arm64.tar.gz | tar xz
-
-            # Start
-            ./rtb start
-            ```
-
-            Open the printed URL in your browser, or scan the QR code with the mobile app.
-
-            ---
-
-            ## RTB — 远程终端桥接工具
-
-            通过 Web 浏览器、手机 App 或飞书机器人随时随地访问和管理终端会话。
-
-            ### 下载说明
-
-            | 平台 | 文件 | 说明 |
-            |------|------|------|
-            | macOS (ARM64) | `rtb-darwin-arm64.tar.gz` | Apple Silicon (M1/M2/M3/M4)，Intel 通过 Rosetta 2 兼容 |
-            | Linux x64 | `rtb-linux-x64.tar.gz` | 大多数服务器和桌面系统 |
-            | Linux ARM64 | `rtb-linux-arm64.tar.gz` | 树莓派、ARM 服务器 |
-            | Android | `rtb-mobile.apk` | 手机客户端 |
-
-            ### 快速开始
-
-            ```bash
-            # 下载并解压（以 macOS 为例）
-            curl -fsSL https://github.com/codeweiz/remote-desktop-control/releases/download/${{ steps.version.outputs.tag }}/rtb-darwin-arm64.tar.gz | tar xz
-
-            # 启动
-            ./rtb start
-            ```
-
-            在浏览器中打开输出的 URL，或用手机 App 扫描终端中的二维码即可连接。
-          files: |
-            artifacts/*.tar.gz
-            artifacts/*.apk
+          files: release/${{ matrix.name }}.tar.gz

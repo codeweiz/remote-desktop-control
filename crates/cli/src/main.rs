@@ -66,23 +66,26 @@ pub enum SessionAction {
 }
 
 fn main() -> anyhow::Result<()> {
-    // Initialize tracing (respects RUST_LOG env var)
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
     let cli = Cli::parse();
 
     match &cli.command {
         // Explicit subcommands
-        Some(Commands::Stop) => daemon::stop_daemon()?,
-        Some(Commands::Status) => daemon::print_status()?,
-        Some(Commands::Session { action }) => commands::session::handle(action)?,
+        Some(Commands::Stop) => {
+            init_basic_tracing();
+            daemon::stop_daemon()?;
+        }
+        Some(Commands::Status) => {
+            init_basic_tracing();
+            daemon::print_status()?;
+        }
+        Some(Commands::Session { action }) => {
+            init_basic_tracing();
+            commands::session::handle(action)?;
+        }
 
-        // `rtb start ...` or just `rtb` (no subcommand) both start the daemon
+        // `rtb start ...` or just `rtb` (no subcommand) both start the daemon.
+        // Tracing is initialized inside start() via setup_logging() which
+        // reads the config for log level and sets up file appenders.
         Some(Commands::Start { .. }) | None => {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -92,4 +95,14 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Simple tracing init for non-daemon commands (stop, status, session).
+fn init_basic_tracing() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .try_init();
 }

@@ -8,14 +8,18 @@ use crate::Cli;
 
 /// Start the RTB daemon.
 ///
-/// Loads configuration, applies CLI overrides, initialises the core state,
-/// generates (or loads) the authentication token, writes a PID file and
-/// finally starts the Axum HTTP/WebSocket server.
+/// Loads configuration, initializes logging, applies CLI overrides, performs
+/// crash recovery, restores sessions, initialises the core state, generates
+/// (or loads) the authentication token, writes a PID file, registers signal
+/// handlers, and finally starts the Axum HTTP/WebSocket server.
 pub async fn start(cli: &Cli) -> anyhow::Result<()> {
     // 1. Load config (fall back to defaults when the file is missing)
     let mut config = Config::load().unwrap_or_default();
 
-    // 2. Apply CLI overrides – top-level flags as well as Start sub-command
+    // 2. Initialize structured logging (console + file appender) before anything else
+    rtb_server::logging::setup_logging(&config)?;
+
+    // 3. Apply CLI overrides – top-level flags as well as Start sub-command
     //    flags are merged so that `rtb --port 8080` and `rtb start --port 8080`
     //    behave identically.
     let (cmd_port, cmd_host) = match &cli.command {
@@ -33,13 +37,21 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
         config.server.shell = shell.clone();
     }
 
-    // 3. Initialize core
+    // 4. Crash recovery — detect and clean up stale PID files
+    daemon::check_stale_pid()?;
+
+    // 5. Session restore — mark orphaned running/suspended sessions as crashed
+    if let Err(e) = daemon::restore_sessions() {
+        tracing::warn!(error = %e, "Session restore encountered an error (continuing)");
+    }
+
+    // 6. Initialize core
     let core = Arc::new(CoreState::new(config.clone())?);
 
-    // 4. Generate or load auth token
+    // 7. Generate or load auth token
     let token = daemon::load_or_create_token(&config)?;
 
-    // 5. Print access info
+    // 8. Print access info
     let url = format!(
         "http://{}:{}?token={}",
         config.server.host, config.server.port, token
@@ -51,20 +63,60 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
     println!("  Token:   {}", token);
     println!();
 
-    // 6. Write PID file
+    // 9. Write PID file
     daemon::write_pid_file()?;
 
-    // 7. Register Ctrl-C handler to clean up the PID file on exit
-    ctrlc::set_handler(move || {
-        let _ = daemon::remove_pid_file();
-        std::process::exit(0);
-    })?;
+    // 10. Register signal handlers for graceful shutdown
+    //     On SIGTERM/SIGINT: log, remove PID file, exit.
+    //     We use tokio::signal for async-safe handling inside the runtime.
+    let shutdown = async {
+        // Wait for either SIGINT (Ctrl-C) or SIGTERM
+        let ctrl_c = tokio::signal::ctrl_c();
 
-    // 8. Start server (blocks until shutdown)
-    rtb_server::start_server(core, token, &config.server.host, config.server.port).await?;
+        #[cfg(unix)]
+        {
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("failed to register SIGTERM handler");
 
-    // 9. Cleanup on normal exit
-    daemon::remove_pid_file()?;
+            tokio::select! {
+                _ = ctrl_c => {},
+                _ = sigterm.recv() => {},
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            ctrl_c.await.ok();
+        }
+
+        tracing::info!("Shutting down...");
+        if let Err(e) = daemon::remove_pid_file() {
+            tracing::warn!(error = %e, "Failed to remove PID file during shutdown");
+        }
+    };
+
+    // 11. Start server with graceful shutdown
+    let state = {
+        use tokio::sync::RwLock;
+
+        rtb_server::state::AppState {
+            core,
+            token: Arc::new(RwLock::new(token)),
+        }
+    };
+
+    let app = rtb_server::router::create_router(state);
+
+    let addr = format!("{}:{}", config.server.host, config.server.port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    tracing::info!("RTB server listening on {}", addr);
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
+        .await?;
+
+    // 12. Final cleanup on normal exit (PID file may already be removed by signal handler)
+    let _ = daemon::remove_pid_file();
 
     Ok(())
 }

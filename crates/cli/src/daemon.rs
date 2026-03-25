@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use rtb_core::config::Config;
+use rtb_core::session::store::SessionStore;
+use rtb_core::session::types::SessionStatus;
 
 // ---------------------------------------------------------------------------
 // Token management
@@ -154,6 +156,97 @@ pub fn print_status() -> Result<()> {
     } else {
         println!("RTB daemon is NOT running.");
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Crash recovery: stale PID detection
+// ---------------------------------------------------------------------------
+
+/// Check for a stale PID file (PID file exists but process is dead).
+/// If found, removes the stale PID file and logs a warning.
+/// Returns `true` if a stale PID file was cleaned up.
+pub fn check_stale_pid() -> Result<bool> {
+    let path = pid_file_path()?;
+    if !path.exists() {
+        return Ok(false);
+    }
+
+    if let Some(pid) = read_pid() {
+        if !process_alive(pid) {
+            tracing::warn!(
+                pid = pid,
+                "Found stale PID file (process {} is not running). Cleaning up.",
+                pid
+            );
+            remove_pid_file()?;
+            return Ok(true);
+        }
+        // Process is alive — another instance is running
+        anyhow::bail!(
+            "RTB daemon is already running (PID {}). Stop it first with `rtb stop`.",
+            pid
+        );
+    }
+
+    // PID file exists but couldn't be parsed — remove it
+    tracing::warn!("Found corrupt PID file. Removing.");
+    remove_pid_file()?;
+    Ok(true)
+}
+
+// ---------------------------------------------------------------------------
+// Session restore: mark orphaned sessions as crashed
+// ---------------------------------------------------------------------------
+
+/// Scan the session store for sessions with status "running" or "suspended".
+/// Since PTY processes cannot survive across daemon restarts, update them
+/// to "crashed" status and log a summary.
+pub fn restore_sessions() -> Result<()> {
+    let sessions_dir = Config::rtb_dir()
+        .map(|d| d.join("sessions"))
+        .unwrap_or_else(|_| PathBuf::from("/tmp/rtb/sessions"));
+
+    // If the sessions directory doesn't exist yet, nothing to restore
+    if !sessions_dir.exists() {
+        return Ok(());
+    }
+
+    let store = SessionStore::new(sessions_dir)
+        .context("failed to open session store for restore")?;
+
+    let sessions = store.list().unwrap_or_default();
+    let mut crashed_count = 0u32;
+
+    for mut meta in sessions {
+        if meta.status == SessionStatus::Running || meta.status == SessionStatus::Suspended {
+            let old_status = format!("{:?}", meta.status);
+            meta.status = SessionStatus::Crashed;
+            if let Err(e) = store.update_meta(&meta.id, &meta) {
+                tracing::warn!(
+                    session_id = %meta.id,
+                    error = %e,
+                    "Failed to update crashed session"
+                );
+            } else {
+                tracing::info!(
+                    session_id = %meta.id,
+                    old_status = %old_status,
+                    "Marked orphaned session as crashed"
+                );
+                crashed_count += 1;
+            }
+        }
+    }
+
+    if crashed_count > 0 {
+        tracing::warn!(
+            count = crashed_count,
+            "Marked {} orphaned session(s) as crashed from previous run",
+            crashed_count
+        );
+    }
+
     Ok(())
 }
 

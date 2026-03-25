@@ -2,10 +2,11 @@
 //
 // Implements the Axum-based web server with REST API endpoints,
 // WebSocket transport for real-time terminal I/O, static file
-// serving, authentication, and rate limiting.
+// serving, authentication, rate limiting, and structured access logging.
 
 pub mod api;
 pub mod auth;
+pub mod logging;
 pub mod router;
 pub mod security;
 pub mod state;
@@ -22,8 +23,8 @@ use crate::state::AppState;
 
 /// Start the RTB HTTP/WebSocket server.
 ///
-/// This binds to `host:port`, wires the Axum router with auth and security
-/// middleware, and serves until the process is terminated.
+/// This binds to `host:port`, wires the Axum router with auth, security,
+/// and access logging middleware, and serves until the process is terminated.
 pub async fn start_server(
     core: Arc<CoreState>,
     token: String,

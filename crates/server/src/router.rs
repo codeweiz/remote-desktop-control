@@ -9,6 +9,7 @@ use serde::Serialize;
 use crate::{
     api::{sessions, status},
     auth::auth_middleware,
+    logging::access_log_middleware,
     security::security_headers,
     state::AppState,
     static_files::static_handler,
@@ -43,6 +44,7 @@ fn api_routes() -> Router<AppState> {
 /// - fallback — static file serving (placeholder)
 ///
 /// Middleware applied (outermost first):
+/// - Access logging (all requests)
 /// - Security headers (all responses)
 /// - Auth (API routes only; WS routes validate tokens themselves)
 pub fn create_router(state: AppState) -> Router {
@@ -72,5 +74,7 @@ pub fn create_router(state: AppState) -> Router {
         .fallback(static_handler)
         // Security headers on every response
         .layer(middleware::from_fn(security_headers))
+        // Access logging on every request
+        .layer(middleware::from_fn(access_log_middleware))
         .with_state(state)
 }
