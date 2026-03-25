@@ -7,3 +7,4 @@
 pub mod config;
 pub mod event_bus;
 pub mod events;
+pub mod pty;

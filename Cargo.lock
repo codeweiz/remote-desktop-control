@@ -1443,10 +1443,12 @@ dependencies = [
 name = "rtb-core"
 version = "2.0.0-alpha.1"
 dependencies = [
+ "anyhow",
  "bytes",
  "chrono",
  "dashmap",
  "dirs",
+ "libc",
  "nanoid",
  "notify",
  "portable-pty",
