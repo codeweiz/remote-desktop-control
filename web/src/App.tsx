@@ -1,0 +1,186 @@
+import { useState, useEffect, useCallback } from 'react'
+import type { Session } from './lib/types'
+import { useTheme } from './hooks/useTheme'
+import { useSessions } from './hooks/useSessions'
+import { useWebSocket } from './hooks/useWebSocket'
+import { TopBar } from './components/TopBar'
+import { StatusBar } from './components/StatusBar'
+import { SessionList } from './components/SessionList'
+import { TerminalView } from './components/TerminalView'
+import { AgentChat } from './components/AgentChat'
+import { CommandPalette } from './components/CommandPalette'
+import { SettingsPanel } from './components/SettingsPanel'
+
+export default function App() {
+  const { theme, toggleTheme } = useTheme()
+  const {
+    tree,
+    statusConnection,
+    addSession,
+    removeSession,
+  } = useSessions()
+
+  // UI state
+  const [activeSession, setActiveSession] = useState<Session | null>(null)
+  const [openTabs, setOpenTabs] = useState<Session[]>([])
+  const [agentPanelVisible, setAgentPanelVisible] = useState(true)
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [fontSize, setFontSize] = useState(() => {
+    const stored = localStorage.getItem('rtb_font_size')
+    return stored ? parseInt(stored, 10) : 14
+  })
+
+  // Active agent session for the chat panel
+  const activeAgentSession = activeSession?.kind === 'agent' ? activeSession : null
+
+  // Status WS for latency measurement
+  const { latency } = useWebSocket({
+    path: '/ws/status',
+    enabled: true,
+  })
+
+  // Persist font size
+  useEffect(() => {
+    localStorage.setItem('rtb_font_size', String(fontSize))
+  }, [fontSize])
+
+  // Cmd+K / Ctrl+K to open command palette
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setCommandPaletteOpen(prev => !prev)
+      }
+      if (e.key === 'Escape') {
+        setCommandPaletteOpen(false)
+        setSettingsOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  // Select a session (open it as a tab too)
+  const handleSelectSession = useCallback((session: Session) => {
+    setActiveSession(session)
+    setOpenTabs(prev => {
+      if (prev.some(t => t.id === session.id)) return prev
+      return [...prev, session]
+    })
+    // Show agent panel if it's an agent session
+    if (session.kind === 'agent') {
+      setAgentPanelVisible(true)
+    }
+  }, [])
+
+  // Close a tab
+  const handleCloseTab = useCallback((sessionId: string) => {
+    setOpenTabs(prev => {
+      const next = prev.filter(t => t.id !== sessionId)
+      // If we closed the active tab, switch to the last remaining one
+      if (activeSession?.id === sessionId) {
+        setActiveSession(next.length > 0 ? next[next.length - 1] : null)
+      }
+      return next
+    })
+  }, [activeSession])
+
+  // Create new terminal
+  const handleCreateTerminal = useCallback(async () => {
+    try {
+      const session = await addSession({ kind: 'terminal' })
+      handleSelectSession(session)
+    } catch {
+      // Error already tracked in useSessions
+    }
+  }, [addSession, handleSelectSession])
+
+  // Create new agent
+  const handleCreateAgent = useCallback(async () => {
+    try {
+      const session = await addSession({ kind: 'agent' })
+      handleSelectSession(session)
+    } catch {
+      // Error already tracked in useSessions
+    }
+  }, [addSession, handleSelectSession])
+
+  // Delete session
+  const handleDeleteSession = useCallback(async (id: string) => {
+    handleCloseTab(id)
+    try {
+      await removeSession(id)
+    } catch {
+      // Error already tracked in useSessions
+    }
+  }, [removeSession, handleCloseTab])
+
+  return (
+    <div className="h-full w-full flex flex-col bg-bg-primary">
+      {/* Top bar */}
+      <TopBar
+        connectionState={statusConnection}
+        latency={latency}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+
+      {/* Main content: three-column layout */}
+      <div className="flex-1 flex min-h-0">
+        {/* Sidebar */}
+        <SessionList
+          tree={tree}
+          activeSessionId={activeSession?.id ?? null}
+          onSelectSession={handleSelectSession}
+          onCreateTerminal={handleCreateTerminal}
+          onCreateAgent={handleCreateAgent}
+          onDeleteSession={handleDeleteSession}
+        />
+
+        {/* Terminal (center) */}
+        <TerminalView
+          activeSession={activeSession}
+          openTabs={openTabs.map(s => ({ session: s }))}
+          fontSize={fontSize}
+          onSelectTab={handleSelectSession}
+          onCloseTab={handleCloseTab}
+        />
+
+        {/* Agent chat (right) */}
+        <AgentChat
+          session={activeAgentSession}
+          isVisible={agentPanelVisible}
+          onToggle={() => setAgentPanelVisible(prev => !prev)}
+        />
+      </div>
+
+      {/* Status bar */}
+      <StatusBar
+        sessionCount={tree.terminals.length}
+        agentCount={tree.agents.length}
+        tunnelUrl={null}
+      />
+
+      {/* Overlays */}
+      <CommandPalette
+        isOpen={commandPaletteOpen}
+        theme={theme}
+        onClose={() => setCommandPaletteOpen(false)}
+        onNewTerminal={handleCreateTerminal}
+        onNewAgent={handleCreateAgent}
+        onToggleTheme={toggleTheme}
+      />
+
+      <SettingsPanel
+        isOpen={settingsOpen}
+        theme={theme}
+        fontSize={fontSize}
+        onClose={() => setSettingsOpen(false)}
+        onToggleTheme={toggleTheme}
+        onSetFontSize={setFontSize}
+      />
+    </div>
+  )
+}

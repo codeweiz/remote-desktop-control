@@ -1,0 +1,199 @@
+import { useEffect, useRef, useCallback, useState } from 'react'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
+import { SearchAddon } from '@xterm/addon-search'
+import '@xterm/xterm/css/xterm.css'
+import type { ConnectionState, WsMessage } from '../lib/types'
+import { getWsUrl } from '../lib/websocket'
+
+interface UseTerminalOptions {
+  sessionId: string | null
+  fontSize?: number
+}
+
+interface UseTerminalReturn {
+  containerRef: React.RefObject<HTMLDivElement | null>
+  connectionState: ConnectionState
+  fitTerminal: () => void
+}
+
+export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): UseTerminalReturn {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const terminalRef = useRef<Terminal | null>(null)
+  const fitAddonRef = useRef<FitAddon | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
+
+  const fitTerminal = useCallback(() => {
+    if (fitAddonRef.current) {
+      try {
+        fitAddonRef.current.fit()
+      } catch {
+        // Ignore fit errors (element might not be visible)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!containerRef.current || !sessionId) return
+
+    const container = containerRef.current
+
+    // Create terminal instance
+    const terminal = new Terminal({
+      fontSize,
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace",
+      theme: {
+        background: '#0d1117',
+        foreground: '#c9d1d9',
+        cursor: '#c9d1d9',
+        cursorAccent: '#0d1117',
+        selectionBackground: '#264f78',
+        selectionForeground: '#ffffff',
+        black: '#484f58',
+        red: '#ff7b72',
+        green: '#7ee787',
+        yellow: '#ffa657',
+        blue: '#79c0ff',
+        magenta: '#d2a8ff',
+        cyan: '#56d4dd',
+        white: '#b1bac4',
+        brightBlack: '#6e7681',
+        brightRed: '#ffa198',
+        brightGreen: '#56d364',
+        brightYellow: '#e3b341',
+        brightBlue: '#a5d6ff',
+        brightMagenta: '#d2a8ff',
+        brightCyan: '#76e3ea',
+        brightWhite: '#f0f6fc',
+      },
+      cursorBlink: true,
+      cursorStyle: 'block',
+      scrollback: 10000,
+      allowProposedApi: true,
+    })
+
+    // Addons
+    const fitAddon = new FitAddon()
+    terminal.loadAddon(fitAddon)
+
+    const searchAddon = new SearchAddon()
+    terminal.loadAddon(searchAddon)
+
+    terminalRef.current = terminal
+    fitAddonRef.current = fitAddon
+
+    // Open terminal in DOM
+    terminal.open(container)
+
+    // Try WebGL renderer, fall back gracefully
+    try {
+      const webglAddon = new WebglAddon()
+      webglAddon.onContextLoss(() => {
+        webglAddon.dispose()
+      })
+      terminal.loadAddon(webglAddon)
+    } catch {
+      // WebGL not available, using default canvas renderer
+    }
+
+    // Initial fit
+    requestAnimationFrame(() => {
+      fitAddon.fit()
+    })
+
+    // Resize observer for responsive terminal
+    const resizeObserver = new ResizeObserver(() => {
+      requestAnimationFrame(() => {
+        try {
+          fitAddon.fit()
+        } catch {
+          // Ignore
+        }
+      })
+    })
+    resizeObserver.observe(container)
+
+    // Connect WebSocket for terminal I/O
+    const url = getWsUrl(`/ws/terminal/${sessionId}`)
+    setConnectionState('connecting')
+    const ws = new WebSocket(url)
+    wsRef.current = ws
+
+    ws.onopen = () => {
+      setConnectionState('connected')
+      terminal.focus()
+
+      // Send initial size
+      const dims = fitAddon.proposeDimensions()
+      if (dims) {
+        ws.send(JSON.stringify({
+          type: 'resize',
+          cols: dims.cols,
+          rows: dims.rows,
+        }))
+      }
+    }
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data) as WsMessage
+        if (msg.type === 'output' && typeof msg.data === 'string') {
+          // Decode base64 output and write to terminal
+          const bytes = atob(msg.data)
+          terminal.write(bytes)
+        }
+      } catch {
+        // Raw text fallback
+        if (typeof event.data === 'string') {
+          terminal.write(event.data)
+        }
+      }
+    }
+
+    ws.onerror = () => {
+      setConnectionState('error')
+    }
+
+    ws.onclose = () => {
+      setConnectionState('disconnected')
+    }
+
+    // Terminal input -> WebSocket
+    const inputDisposable = terminal.onData((data: string) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        // Base64 encode input
+        ws.send(JSON.stringify({
+          type: 'input',
+          data: btoa(data),
+        }))
+      }
+    })
+
+    // Terminal resize -> WebSocket
+    const resizeDisposable = terminal.onResize(({ cols, rows }) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'resize',
+          cols,
+          rows,
+        }))
+      }
+    })
+
+    return () => {
+      resizeObserver.disconnect()
+      inputDisposable.dispose()
+      resizeDisposable.dispose()
+      ws.close()
+      wsRef.current = null
+      terminal.dispose()
+      terminalRef.current = null
+      fitAddonRef.current = null
+      setConnectionState('disconnected')
+    }
+  }, [sessionId, fontSize])
+
+  return { containerRef, connectionState, fitTerminal }
+}
