@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use tauri::Manager;
+
 mod commands;
 mod tray;
 
@@ -28,11 +30,24 @@ fn main() {
         ])
         .setup(|app| {
             tray::create_tray(app)?;
-            // Start embedded daemon in background
+            // Start embedded daemon in background, then inject token into WebView
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = commands::start_embedded_daemon(app_handle).await {
+                if let Err(e) = commands::start_embedded_daemon(app_handle.clone()).await {
                     tracing::error!("Failed to start embedded daemon: {}", e);
+                    return;
+                }
+                // Inject auth token into the WebView's localStorage so the frontend
+                // can authenticate API/WebSocket calls to the embedded server.
+                let state: tauri::State<'_, commands::DaemonStateRef> = app_handle.state();
+                let token = state.read().await.token.clone();
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let js = format!(
+                        "localStorage.setItem('rtb_token', '{}'); window.location.reload();",
+                        token
+                    );
+                    let _ = window.eval(&js);
+                    tracing::info!("Injected auth token into WebView");
                 }
             });
             Ok(())
