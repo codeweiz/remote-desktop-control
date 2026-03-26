@@ -5,7 +5,6 @@ use axum::{
     },
     response::IntoResponse,
 };
-use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::time::{interval, Duration};
@@ -26,6 +25,11 @@ pub struct TerminalParams {
 enum ClientCommand {
     #[serde(rename = "resize")]
     Resize { cols: u16, rows: u16 },
+    #[serde(rename = "keepalive")]
+    Keepalive {
+        #[allow(dead_code)]
+        client_time: Option<i64>,
+    },
 }
 
 /// Terminal WebSocket upgrade handler.
@@ -64,13 +68,12 @@ pub async fn ws_terminal(
 
 /// Main terminal WebSocket loop after upgrade.
 ///
-/// Subscribes to the PTY session's live broadcast channel and forwards
-/// output to the WebSocket. Client input (binary frames) is written to
-/// the PTY's stdin. JSON text frames are parsed as commands (e.g. resize).
-///
-/// NOTE: This implementation will be fully rewritten in Task 5 to use the
-/// new binary WebSocket protocol. For now, it uses base64 encoding to keep
-/// the existing frontend working.
+/// - Sends initial screen content via `capture-pane` on connect (anti-reconnect-storm).
+/// - Forwards PTY output to client as Binary frames.
+/// - Client input (Binary frames) is written to the PTY stdin.
+/// - JSON text frames are parsed as commands (resize, keepalive).
+/// - Monitors session status for exit notification.
+/// - Closes on lag so the client can reconnect cleanly.
 async fn handle_terminal(
     socket: WebSocket,
     state: AppState,
@@ -80,7 +83,7 @@ async fn handle_terminal(
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    // Subscribe to live output from the PTY session's broadcast channel
+    // Lookup session and subscribe to channels
     let session = match state.core.pty_manager.get_session(&session_id) {
         Some(s) => s,
         None => {
@@ -89,6 +92,15 @@ async fn handle_terminal(
         }
     };
     let mut live_rx = session.subscribe();
+    let mut status_rx = session.subscribe_status();
+
+    // Capture-pane on connect: send current screen content so a reconnecting
+    // client gets a full screen immediately without waiting for new output.
+    if let Ok(initial) = rtb_core::pty::tmux::capture_pane(&session_id) {
+        if !initial.is_empty() {
+            let _ = ws_tx.send(Message::Binary(initial.into())).await;
+        }
+    }
 
     // Heartbeat: ping every 30 seconds
     let mut ping_interval = interval(Duration::from_secs(30));
@@ -112,7 +124,7 @@ async fn handle_terminal(
                         }
                     }
                     Some(Ok(Message::Text(text))) => {
-                        // JSON command (e.g. resize)
+                        // JSON command (resize, keepalive, etc.)
                         match serde_json::from_str::<ClientCommand>(&text) {
                             Ok(ClientCommand::Resize { cols, rows }) => {
                                 debug!(session_id = %session_id, cols, rows, "resize request");
@@ -120,8 +132,17 @@ async fn handle_terminal(
                                     warn!(session_id = %session_id, error = %e, "failed to resize PTY");
                                 }
                             }
+                            Ok(ClientCommand::Keepalive { .. }) => {
+                                let ack = serde_json::json!({
+                                    "type": "keepalive_ack",
+                                    "server_time": chrono::Utc::now().timestamp_millis(),
+                                });
+                                let _ = ws_tx.send(Message::Text(ack.to_string().into())).await;
+                            }
                             Err(e) => {
-                                warn!(session_id = %session_id, error = %e, text = %text, "unknown client command");
+                                // Unknown text command — log and ignore.
+                                // PTY input comes via Binary frames only.
+                                warn!(session_id = %session_id, error = %e, text = %text, "unknown client command, ignoring");
                             }
                         }
                     }
@@ -142,23 +163,18 @@ async fn handle_terminal(
                 }
             }
 
-            // Live output from the PTY broadcast channel
+            // Live output from the PTY broadcast channel — send as Binary frame
             result = live_rx.recv() => {
                 match result {
                     Ok(data) => {
-                        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-                        let msg = serde_json::json!({
-                            "type": "output",
-                            "data": b64,
-                        });
-                        if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
+                        if ws_tx.send(Message::Binary(data.into())).await.is_err() {
                             debug!(session_id = %session_id, "failed to send PTY output, closing");
                             break;
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        warn!(session_id = %session_id, skipped = n, "WebSocket consumer lagged, some output lost");
-                        // Continue — we'll catch up with the next message
+                        warn!(session_id = %session_id, skipped = n, "client lagging, closing for reconnect");
+                        break;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         // PTY session ended — the broadcast sender was dropped
@@ -170,6 +186,16 @@ async fn handle_terminal(
                         let _ = ws_tx.send(Message::Text(msg.to_string().into())).await;
                         break;
                     }
+                }
+            }
+
+            // Session status watch — notify client on exit
+            _ = status_rx.changed() => {
+                let status = status_rx.borrow().clone();
+                if let rtb_core::pty::session::PtyStatus::Exited(code) = status {
+                    let msg = serde_json::json!({"type": "exit", "code": code});
+                    let _ = ws_tx.send(Message::Text(msg.to_string().into())).await;
+                    break;
                 }
             }
 
