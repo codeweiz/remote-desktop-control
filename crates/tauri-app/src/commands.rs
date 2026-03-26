@@ -182,6 +182,7 @@ mod server_commands {
             plugins_dir,
             Arc::clone(&core.event_bus),
             config.plugins.jsonrpc_timeout_secs,
+            config.server.port,
         ));
         if let Err(e) = plugin_manager.start_all().await {
             tracing::warn!(error = %e, "Plugin manager start_all encountered errors (continuing)");
@@ -202,10 +203,16 @@ mod server_commands {
         // Generate or load auth token
         let token = load_or_create_token(&config)?;
 
+        // Shared tunnel URL – created here so it can be used by both the
+        // AppState inside the server spawn and the tunnel-URL listener below.
+        let tunnel_url: Arc<tokio::sync::RwLock<Option<String>>> =
+            Arc::new(tokio::sync::RwLock::new(None));
+
         // Start the HTTP/WebSocket server on a background task
         let server_core = Arc::clone(&core);
         let server_token = token.clone();
         let server_pm = Arc::clone(&plugin_manager);
+        let server_tunnel_url = Arc::clone(&tunnel_url);
         tokio::spawn(async move {
             let blocklist = Arc::new(rtb_server::blocklist::IpBlocklist::new(Vec::new()));
             let rate_limiter = Arc::new(rtb_server::rate_limit::RateLimiter::new());
@@ -229,7 +236,7 @@ mod server_commands {
                 rate_limiter,
                 blocklist,
                 plugin_manager: Some(server_pm),
-                tunnel_url: Arc::new(tokio::sync::RwLock::new(None)),
+                tunnel_url: server_tunnel_url,
             };
 
             let app = rtb_server::router::create_router(state);
@@ -273,6 +280,32 @@ mod server_commands {
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                             tracing::warn!(skipped = n, "notification store listener lagged");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
+        }
+
+        // Background: track tunnel URL from TunnelReady/TunnelDown events
+        {
+            let tunnel_url = Arc::clone(&tunnel_url);
+            let mut control_rx = core.event_bus.subscribe_control();
+            tokio::spawn(async move {
+                loop {
+                    match control_rx.recv().await {
+                        Ok(event) => match event.as_ref() {
+                            rtb_core::events::ControlEvent::TunnelReady { url } => {
+                                tracing::info!(url = %url, "tunnel URL stored");
+                                *tunnel_url.write().await = Some(url.clone());
+                            }
+                            rtb_core::events::ControlEvent::TunnelDown { .. } => {
+                                *tunnel_url.write().await = None;
+                            }
+                            _ => {}
+                        },
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!(skipped = n, "tunnel URL listener lagged");
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     }
