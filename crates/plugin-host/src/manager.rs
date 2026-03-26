@@ -57,16 +57,19 @@ pub struct PluginManager {
     event_bus: Arc<EventBus>,
     /// JSON-RPC timeout in seconds.
     timeout_secs: u64,
+    /// The local server port that tunnel plugins should forward traffic to.
+    server_port: u16,
 }
 
 impl PluginManager {
     /// Create a new plugin manager.
-    pub fn new(plugins_dir: PathBuf, event_bus: Arc<EventBus>, timeout_secs: u64) -> Self {
+    pub fn new(plugins_dir: PathBuf, event_bus: Arc<EventBus>, timeout_secs: u64, server_port: u16) -> Self {
         Self {
             plugins_dir,
             plugins: Arc::new(RwLock::new(HashMap::new())),
             event_bus,
             timeout_secs,
+            server_port,
         }
     }
 
@@ -223,7 +226,7 @@ impl PluginManager {
             }),
             PluginType::Tunnel => serde_json::json!({
                 "config": {},
-                "local_port": 3000
+                "local_port": self.server_port
             }),
         };
 
@@ -261,7 +264,7 @@ impl PluginManager {
         if plugin_type == PluginType::Tunnel {
             let start_params = serde_json::json!({
                 "config": {},
-                "local_port": 3000
+                "local_port": self.server_port
             });
             match process.call(
                 crate::types::tunnel_methods::START,
