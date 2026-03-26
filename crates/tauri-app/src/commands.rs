@@ -228,6 +228,7 @@ pub async fn start_embedded_daemon(app: AppHandle) -> anyhow::Result<()> {
             rate_limiter,
             blocklist,
             plugin_manager: Some(server_pm),
+            tunnel_url: Arc::new(tokio::sync::RwLock::new(None)),
         };
 
         let app = rtb_server::router::create_router(state);

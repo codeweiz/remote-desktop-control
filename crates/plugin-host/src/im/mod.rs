@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info, warn};
 
 use rtb_core::event_bus::EventBus;
-use rtb_core::events::{ControlEvent, DataEvent};
+use rtb_core::events::{ControlEvent, DataEvent, SessionType};
 
 use crate::protocol::JsonRpcNotification;
 use crate::types::{im_methods, ImOnMessageParams, ImOnStatusParams, ImConnectionStatus};
@@ -512,32 +512,62 @@ impl ImBridge {
     ///
     /// Spawns a background task that listens for `NotificationTriggered` control
     /// events and sends them as IM messages to all active channels.
+    ///
+    /// Also auto-monitors new agent sessions so their output is forwarded to
+    /// all connected IM channels without requiring an explicit `/attach`.
     pub fn start_notification_listener(&self) {
         let mut control_rx = self.event_bus.subscribe_control();
         let outgoing_tx = self.outgoing_tx.clone();
+        let event_bus = Arc::clone(&self.event_bus);
 
         tokio::spawn(async move {
             loop {
                 match control_rx.recv().await {
                     Ok(event) => {
-                        if let ControlEvent::NotificationTriggered {
-                            session_id,
-                            trigger_type,
-                            summary,
-                            urgent,
-                        } = event.as_ref()
-                        {
-                            let urgency = if *urgent { " [URGENT]" } else { "" };
-                            let text = format!(
-                                "[{trigger_type}]{urgency} session={session_id}: {summary}"
-                            );
-                            debug!(text = %text, "forwarding notification to IM");
-                            let _ = outgoing_tx
-                                .send(OutgoingMessage {
-                                    text,
-                                    channel: None, // broadcast to default channel
-                                })
-                                .await;
+                        match event.as_ref() {
+                            ControlEvent::NotificationTriggered {
+                                session_id,
+                                trigger_type,
+                                summary,
+                                urgent,
+                            } => {
+                                let urgency = if *urgent { " [URGENT]" } else { "" };
+                                let text = format!(
+                                    "[{trigger_type}]{urgency} session={session_id}: {summary}"
+                                );
+                                debug!(text = %text, "forwarding notification to IM");
+                                let _ = outgoing_tx
+                                    .send(OutgoingMessage {
+                                        text,
+                                        channel: None, // broadcast to default channel
+                                    })
+                                    .await;
+                            }
+                            ControlEvent::SessionCreated {
+                                session_id,
+                                session_type: SessionType::Agent,
+                            } => {
+                                info!(
+                                    session_id = %session_id,
+                                    "auto-monitoring new agent session for IM"
+                                );
+                                // Notify all IM channels about the new agent session
+                                let _ = outgoing_tx
+                                    .send(OutgoingMessage {
+                                        text: format!(
+                                            "\u{1f916} New agent session created: {session_id}"
+                                        ),
+                                        channel: None,
+                                    })
+                                    .await;
+                                // Auto-monitor agent session, broadcasting to all channels
+                                Self::spawn_broadcast_monitor(
+                                    &event_bus,
+                                    session_id,
+                                    outgoing_tx.clone(),
+                                );
+                            }
+                            _ => {}
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -546,6 +576,102 @@ impl ImBridge {
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         break;
                     }
+                }
+            }
+        });
+    }
+
+    /// Spawn a broadcast monitor for an agent session that sends output to ALL
+    /// connected IM channels (channel: None), rather than a specific channel.
+    fn spawn_broadcast_monitor(
+        event_bus: &EventBus,
+        session_id: &str,
+        outgoing_tx: mpsc::Sender<OutgoingMessage>,
+    ) {
+        let mut data_rx = event_bus.create_data_subscriber(session_id);
+        let session_id = session_id.to_string();
+
+        tokio::spawn(async move {
+            loop {
+                match data_rx.recv().await {
+                    Some(DataEvent::AgentText { content, .. }) => {
+                        if !content.is_empty() {
+                            let _ = outgoing_tx.send(OutgoingMessage {
+                                text: format!("[agent {session_id}] {content}"),
+                                channel: None,
+                            }).await;
+                        }
+                    }
+                    Some(DataEvent::AgentThinking { .. }) => {
+                        // Skip thinking events to reduce noise
+                    }
+                    Some(DataEvent::AgentToolUse { name, .. }) => {
+                        let _ = outgoing_tx.send(OutgoingMessage {
+                            text: format!("[agent {session_id}] \u{1f527} Using tool: {name}"),
+                            channel: None,
+                        }).await;
+                    }
+                    Some(DataEvent::AgentToolResult { output, is_error, .. }) => {
+                        let prefix = if is_error { "Tool error" } else { "Tool result" };
+                        let truncated = if output.len() > AGENT_TOOL_RESULT_MAX_LEN {
+                            format!(
+                                "{}...\n[truncated, {} bytes total]",
+                                &output[..AGENT_TOOL_RESULT_MAX_LEN],
+                                output.len()
+                            )
+                        } else {
+                            output
+                        };
+                        let _ = outgoing_tx.send(OutgoingMessage {
+                            text: format!("[agent {session_id}] {prefix}: {truncated}"),
+                            channel: None,
+                        }).await;
+                    }
+                    Some(DataEvent::AgentProgress { message, .. }) => {
+                        let _ = outgoing_tx.send(OutgoingMessage {
+                            text: format!("[agent {session_id}] [progress] {message}"),
+                            channel: None,
+                        }).await;
+                    }
+                    Some(DataEvent::AgentTurnComplete { cost_usd, .. }) => {
+                        let cost_info = cost_usd
+                            .map(|c| format!(" (cost: ${c:.4})"))
+                            .unwrap_or_default();
+                        let _ = outgoing_tx.send(OutgoingMessage {
+                            text: format!("[agent {session_id}] \u{2705} Turn complete{cost_info}"),
+                            channel: None,
+                        }).await;
+                    }
+                    Some(DataEvent::AgentError { message, guidance, .. }) => {
+                        let text = if guidance.is_empty() {
+                            format!("[agent {session_id}] \u{274c} Error: {message}")
+                        } else {
+                            format!("[agent {session_id}] \u{274c} Error: {message}\nGuidance: {guidance}")
+                        };
+                        let _ = outgoing_tx.send(OutgoingMessage {
+                            text,
+                            channel: None,
+                        }).await;
+                    }
+                    // PTY events from agent sessions (if any)
+                    Some(DataEvent::PtyOutput { data, .. }) => {
+                        let text = String::from_utf8_lossy(&data);
+                        let clean = strip_ansi(&text);
+                        if !clean.is_empty() {
+                            let _ = outgoing_tx.send(OutgoingMessage {
+                                text: format!("[agent {session_id}] {clean}"),
+                                channel: None,
+                            }).await;
+                        }
+                    }
+                    Some(DataEvent::PtyExited { exit_code }) => {
+                        let _ = outgoing_tx.send(OutgoingMessage {
+                            text: format!("[agent {session_id}] PTY exited with code {exit_code}"),
+                            channel: None,
+                        }).await;
+                        return;
+                    }
+                    None => return, // channel closed
                 }
             }
         });

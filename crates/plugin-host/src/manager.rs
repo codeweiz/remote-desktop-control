@@ -257,6 +257,48 @@ impl PluginManager {
             }
         }
 
+        // Auto-start tunnel after successful initialization
+        if plugin_type == PluginType::Tunnel {
+            let start_params = serde_json::json!({
+                "config": {},
+                "local_port": 3000
+            });
+            match process.call(
+                crate::types::tunnel_methods::START,
+                Some(start_params),
+            ).await {
+                Ok(resp) => {
+                    if resp.is_error() {
+                        let err = resp.error.unwrap();
+                        warn!(
+                            plugin_id = %plugin_id,
+                            code = err.code,
+                            message = %err.message,
+                            "tunnel auto-start failed"
+                        );
+                    } else {
+                        info!(plugin_id = %plugin_id, "tunnel auto-started successfully");
+                        // Extract URL from response if available
+                        if let Some(ref result) = resp.result {
+                            if let Some(url) = result.get("url").and_then(|v| v.as_str()) {
+                                info!(url = %url, "tunnel URL available");
+                                self.event_bus.publish_control(ControlEvent::TunnelReady {
+                                    url: url.to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        plugin_id = %plugin_id,
+                        error = %e,
+                        "tunnel auto-start error"
+                    );
+                }
+            }
+        }
+
         // Wire up IM bridge sender if this is an IM plugin
         if let Some(ref bridge) = im_bridge {
             // Create a sender closure that calls the plugin's send_message method

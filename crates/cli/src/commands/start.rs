@@ -220,6 +220,7 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
             rate_limiter,
             blocklist,
             plugin_manager: Some(Arc::clone(&plugin_manager)),
+            tunnel_url: Arc::new(RwLock::new(None)),
         }
     };
 
@@ -249,6 +250,35 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!(skipped = n, "notification store listener lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    // Background task: listen for TunnelReady/TunnelDown events and update
+    // the stored tunnel URL so that GET /api/v1/tunnel/status returns the URL.
+    {
+        let tunnel_url = Arc::clone(&state.tunnel_url);
+        let mut control_rx = core.event_bus.subscribe_control();
+        tokio::spawn(async move {
+            loop {
+                match control_rx.recv().await {
+                    Ok(event) => match event.as_ref() {
+                        rtb_core::events::ControlEvent::TunnelReady { url } => {
+                            tracing::info!(url = %url, "tunnel URL stored");
+                            *tunnel_url.write().await = Some(url.clone());
+                        }
+                        rtb_core::events::ControlEvent::TunnelDown { .. } => {
+                            *tunnel_url.write().await = None;
+                        }
+                        _ => {}
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(skipped = n, "tunnel URL listener lagged");
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         break;

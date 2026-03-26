@@ -45,6 +45,7 @@ pub async fn start_server(
         rate_limiter,
         blocklist: blocklist.clone(),
         plugin_manager: None,
+        tunnel_url: Arc::new(RwLock::new(None)),
     };
 
     // Background task: clean up expired bans every 5 minutes.

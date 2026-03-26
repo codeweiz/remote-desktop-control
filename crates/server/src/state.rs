@@ -20,4 +20,6 @@ pub struct AppState {
     /// Optional plugin manager. `None` when the daemon is not fully started
     /// or when accessed from contexts where PluginManager is not available.
     pub plugin_manager: Option<Arc<PluginManager>>,
+    /// Current tunnel URL, updated when TunnelReady events are received.
+    pub tunnel_url: Arc<RwLock<Option<String>>>,
 }

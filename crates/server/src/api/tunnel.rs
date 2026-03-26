@@ -48,6 +48,9 @@ struct MessageBody {
 
 /// GET /api/v1/tunnel/status — get tunnel status.
 pub async fn tunnel_status(State(state): State<AppState>) -> impl IntoResponse {
+    // Read the current tunnel URL from shared state
+    let current_url = state.tunnel_url.read().await.clone();
+
     match &state.plugin_manager {
         Some(pm) => {
             // Check if any tunnel plugin is running
@@ -60,13 +63,16 @@ pub async fn tunnel_status(State(state): State<AppState>) -> impl IntoResponse {
                 });
 
             match tunnel_plugin {
-                Some((id, name, plugin_state)) => Json(TunnelStatusResponse {
-                    active: plugin_state.to_string() == "ready",
-                    provider: Some(name.clone()),
-                    url: None,
-                    message: format!("Tunnel plugin '{}' is {}", id, plugin_state),
-                })
-                .into_response(),
+                Some((id, name, plugin_state)) => {
+                    let is_active = plugin_state.to_string() == "ready";
+                    Json(TunnelStatusResponse {
+                        active: is_active && current_url.is_some(),
+                        provider: Some(name.clone()),
+                        url: current_url,
+                        message: format!("Tunnel plugin '{}' is {}", id, plugin_state),
+                    })
+                    .into_response()
+                }
                 None => Json(TunnelStatusResponse {
                     active: false,
                     provider: None,
