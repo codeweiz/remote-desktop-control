@@ -49,6 +49,31 @@ pub enum Commands {
         #[command(subcommand)]
         action: TokenAction,
     },
+    /// Agent session management
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
+    /// Plugin management
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
+    /// Tunnel management
+    Tunnel {
+        #[command(subcommand)]
+        action: TunnelAction,
+    },
+    /// Task queue management
+    Task {
+        #[command(subcommand)]
+        action: TaskAction,
+    },
+    /// Configuration management
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -78,6 +103,96 @@ pub enum TokenAction {
     Show,
 }
 
+#[derive(Subcommand)]
+pub enum AgentAction {
+    /// Create a new agent session
+    New {
+        /// Optional agent session name
+        name: Option<String>,
+        /// Agent provider (e.g., claude-code)
+        #[arg(long, default_value = "claude-code")]
+        provider: Option<String>,
+        /// Agent model (e.g., opus-4)
+        #[arg(long)]
+        model: Option<String>,
+        /// Working directory
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PluginAction {
+    /// List all plugins
+    List,
+    /// Enable a plugin
+    Enable {
+        /// Plugin name or ID
+        name: String,
+    },
+    /// Disable a plugin
+    Disable {
+        /// Plugin name or ID
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum TunnelAction {
+    /// Start a tunnel
+    Start {
+        /// Tunnel provider (e.g., cloudflare)
+        #[arg(long)]
+        provider: Option<String>,
+        /// Custom domain
+        #[arg(long)]
+        domain: Option<String>,
+    },
+    /// Stop the tunnel
+    Stop,
+    /// Show tunnel status
+    Status,
+}
+
+#[derive(Subcommand)]
+pub enum TaskAction {
+    /// Add a new task to the queue
+    Add {
+        /// Task title / description
+        title: String,
+        /// Priority: p0, p1 (default), or p2
+        #[arg(long)]
+        priority: Option<String>,
+        /// Working directory for the task
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Comma-separated list of task IDs this task depends on
+        #[arg(long)]
+        depends_on: Option<String>,
+    },
+    /// List all tasks
+    List,
+    /// Cancel a task
+    Cancel {
+        /// Task ID to cancel
+        id: String,
+    },
+    /// Pause the task scheduler
+    Pause,
+    /// Resume the task scheduler
+    Resume,
+}
+
+#[derive(Subcommand)]
+pub enum ConfigAction {
+    /// Show current configuration
+    Show,
+    /// Open config in $EDITOR
+    Edit,
+    /// Initialize default configuration
+    Init,
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
@@ -98,6 +213,26 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Token { action }) => {
             init_basic_tracing();
             commands::token::handle(action)?;
+        }
+        Some(Commands::Agent { action }) => {
+            init_basic_tracing();
+            commands::agent::handle(action)?;
+        }
+        Some(Commands::Plugin { action }) => {
+            init_basic_tracing();
+            commands::plugin::handle(action)?;
+        }
+        Some(Commands::Tunnel { action }) => {
+            init_basic_tracing();
+            commands::tunnel::handle(action)?;
+        }
+        Some(Commands::Task { action }) => {
+            init_basic_tracing();
+            commands::task::handle(action)?;
+        }
+        Some(Commands::Config { action }) => {
+            init_basic_tracing();
+            commands::config::handle(action)?;
         }
 
         // `rtb start ...` or just `rtb` (no subcommand) both start the daemon.

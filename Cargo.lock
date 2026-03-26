@@ -1731,6 +1731,7 @@ dependencies = [
  "mime_guess",
  "nanoid",
  "rtb-core",
+ "rtb-plugin-host",
  "rust-embed",
  "serde",
  "serde_json",

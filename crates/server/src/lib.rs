@@ -44,6 +44,7 @@ pub async fn start_server(
         token: Arc::new(RwLock::new(token)),
         rate_limiter,
         blocklist: blocklist.clone(),
+        plugin_manager: None,
     };
 
     // Background task: clean up expired bans every 5 minutes.

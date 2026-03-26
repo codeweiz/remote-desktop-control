@@ -7,7 +7,7 @@ use axum::{
 use serde::Serialize;
 
 use crate::{
-    api::{sessions, status, token},
+    api::{plugins, sessions, status, tasks, token, tunnel},
     auth::auth_middleware,
     logging::access_log_middleware,
     rate_limit::rate_limit_middleware,
@@ -30,11 +30,29 @@ async fn health() -> impl IntoResponse {
 /// Build the set of API routes that require authentication.
 fn api_routes() -> Router<AppState> {
     Router::new()
+        // Status
         .route("/status", get(status::get_status))
+        // Sessions
         .route("/sessions", get(sessions::list_sessions))
         .route("/sessions", post(sessions::create_session))
         .route("/sessions/{id}", delete(sessions::delete_session))
+        // Token
         .route("/token/rotate", post(token::rotate_token))
+        // Tasks
+        .route("/tasks", get(tasks::list_tasks))
+        .route("/tasks", post(tasks::add_task))
+        .route("/tasks/{id}", delete(tasks::cancel_task))
+        .route("/tasks/{id}/approve", post(tasks::approve_task))
+        .route("/tasks/scheduler/pause", post(tasks::pause_scheduler))
+        .route("/tasks/scheduler/resume", post(tasks::resume_scheduler))
+        // Plugins
+        .route("/plugins", get(plugins::list_plugins))
+        .route("/plugins/{name}/enable", post(plugins::enable_plugin))
+        .route("/plugins/{name}/disable", post(plugins::disable_plugin))
+        // Tunnel
+        .route("/tunnel/status", get(tunnel::tunnel_status))
+        .route("/tunnel/start", post(tunnel::start_tunnel))
+        .route("/tunnel/stop", post(tunnel::stop_tunnel))
 }
 
 /// Assemble the complete application router.

@@ -1,4 +1,5 @@
 use rtb_core::CoreState;
+use rtb_plugin_host::manager::PluginManager;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -16,4 +17,7 @@ pub struct AppState {
     pub rate_limiter: Arc<RateLimiter>,
     /// IP blocklist with progressive ban durations.
     pub blocklist: Arc<IpBlocklist>,
+    /// Optional plugin manager. `None` when the daemon is not fully started
+    /// or when accessed from contexts where PluginManager is not available.
+    pub plugin_manager: Option<Arc<PluginManager>>,
 }

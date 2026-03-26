@@ -202,6 +202,7 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
             token: Arc::new(RwLock::new(token)),
             rate_limiter,
             blocklist,
+            plugin_manager: Some(Arc::clone(&plugin_manager)),
         }
     };
 
