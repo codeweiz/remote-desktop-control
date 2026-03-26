@@ -172,6 +172,7 @@ impl PluginManager {
     ) -> Result<(), PluginManagerError> {
         let plugin_id = manifest.plugin.id.clone();
         let plugin_name = manifest.plugin.name.clone();
+        let plugin_config = manifest.config.clone();
         let plugin_type = manifest.plugin.plugin_type.clone();
         let plugin_dir = self.plugins_dir.join(&plugin_id);
 
@@ -222,10 +223,10 @@ impl PluginManager {
         let init_params = match plugin_type {
             PluginType::Im => serde_json::json!({
                 "protocol_version": "1.0",
-                "config": {}
+                "config": plugin_config
             }),
             PluginType::Tunnel => serde_json::json!({
-                "config": {},
+                "config": plugin_config,
                 "local_port": self.server_port
             }),
         };
