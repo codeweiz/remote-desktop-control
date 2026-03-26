@@ -20,7 +20,7 @@ axum = { version = "0.8", features = ["ws", "macros"] }
 axum-extra = { version = "0.10", features = ["cookie", "typed-header"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
-tower_governor = "0.5"
+dashmap.workspace = true
 rust-embed = "8"
 mime_guess = "2"
 tokio-tungstenite = "0.26"

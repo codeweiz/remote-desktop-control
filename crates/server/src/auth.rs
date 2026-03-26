@@ -7,6 +7,7 @@ use axum::{
 };
 use axum_extra::extract::CookieJar;
 
+use crate::rate_limit::extract_client_ip;
 use crate::state::AppState;
 
 /// Cookie name used to persist the auth token on the client.
@@ -30,6 +31,13 @@ pub async fn auth_middleware(
     request: Request<Body>,
     next: Next,
 ) -> Response {
+    let ip = extract_client_ip(&request);
+
+    // Check IP blocklist before spending time on token validation.
+    if state.blocklist.is_banned(&ip) {
+        return (StatusCode::FORBIDDEN, "Forbidden: IP banned").into_response();
+    }
+
     let expected = state.token.read().await.clone();
 
     // 1. Check Authorization header
@@ -37,6 +45,7 @@ pub async fn auth_middleware(
         if let Ok(value) = auth_header.to_str() {
             if let Some(bearer_token) = value.strip_prefix("Bearer ") {
                 if bearer_token == expected {
+                    state.blocklist.record_success(&ip);
                     return next.run(request).await;
                 }
             }
@@ -46,6 +55,7 @@ pub async fn auth_middleware(
     // 2. Check cookie
     if let Some(cookie) = jar.get(TOKEN_COOKIE) {
         if cookie.value() == expected {
+            state.blocklist.record_success(&ip);
             return next.run(request).await;
         }
     }
@@ -55,6 +65,7 @@ pub async fn auth_middleware(
         for pair in query.split('&') {
             if let Some(token_value) = pair.strip_prefix("token=") {
                 if token_value == expected {
+                    state.blocklist.record_success(&ip);
                     // Build redirect URL without the token parameter
                     let clean_uri = strip_token_param(request.uri());
                     let cookie_header = format!(
@@ -72,7 +83,8 @@ pub async fn auth_middleware(
         }
     }
 
-    // No valid credential found.
+    // No valid credential found — record failure for blocklist tracking.
+    state.blocklist.record_failure(&ip);
     (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
 }
 

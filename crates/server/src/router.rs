@@ -10,6 +10,7 @@ use crate::{
     api::{sessions, status},
     auth::auth_middleware,
     logging::access_log_middleware,
+    rate_limit::rate_limit_middleware,
     security::security_headers,
     state::AppState,
     static_files::static_handler,
@@ -74,6 +75,11 @@ pub fn create_router(state: AppState) -> Router {
         .fallback(static_handler)
         // Security headers on every response
         .layer(middleware::from_fn(security_headers))
+        // Per-IP rate limiting + blocklist check (before auth)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit_middleware,
+        ))
         // Access logging on every request
         .layer(middleware::from_fn(access_log_middleware))
         .with_state(state)

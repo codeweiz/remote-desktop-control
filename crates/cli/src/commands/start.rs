@@ -97,12 +97,30 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
     };
 
     // 11. Start server with graceful shutdown
+    let blocklist = Arc::new(rtb_server::blocklist::IpBlocklist::new(Vec::new()));
+    let rate_limiter = Arc::new(rtb_server::rate_limit::RateLimiter::new());
+
+    // Background task: clean up expired bans every 5 minutes.
+    tokio::spawn({
+        let blocklist = blocklist.clone();
+        async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(5 * 60));
+            loop {
+                interval.tick().await;
+                blocklist.cleanup_expired();
+            }
+        }
+    });
+
     let state = {
         use tokio::sync::RwLock;
 
         rtb_server::state::AppState {
             core,
             token: Arc::new(RwLock::new(token)),
+            rate_limiter,
+            blocklist,
         }
     };
 
