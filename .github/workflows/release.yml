@@ -8,28 +8,32 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-server:
+    name: Server (${{ matrix.name }})
     strategy:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            name: rtb-linux-x64
+            name: linux-x64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            name: rtb-linux-arm64
+            name: linux-arm64
           - target: aarch64-apple-darwin
             os: macos-latest
-            name: rtb-darwin-arm64
+            name: darwin-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
       - name: Install cross-compilation tools
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
@@ -39,13 +43,27 @@ jobs:
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
       - name: Build frontend
         run: cd web && npm ci && npm run build
-      - name: Build binary
+      - name: Build server binary
         run: cargo build --release --target ${{ matrix.target }} -p rtb-cli
+      - name: Build plugins
+        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        run: |
+          cargo build --release --target ${{ matrix.target }} --manifest-path plugins/feishu-plugin/Cargo.toml
+          cargo build --release --target ${{ matrix.target }} --manifest-path plugins/cloudflare-tunnel/Cargo.toml
+      - name: Build plugins (cross)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          cargo build --release --target ${{ matrix.target }} --manifest-path plugins/feishu-plugin/Cargo.toml
+          cargo build --release --target ${{ matrix.target }} --manifest-path plugins/cloudflare-tunnel/Cargo.toml
       - name: Package
         run: |
-          mkdir -p release
-          cp target/${{ matrix.target }}/release/rtb-cli release/${{ matrix.name }}
-          cd release && tar czf ${{ matrix.name }}.tar.gz ${{ matrix.name }}
+          mkdir -p release/plugins
+          cp target/${{ matrix.target }}/release/rtb-cli release/rtb
+          cp plugins/feishu-plugin/target/${{ matrix.target }}/release/feishu-plugin release/plugins/ || true
+          cp plugins/cloudflare-tunnel/target/${{ matrix.target }}/release/cloudflare-tunnel release/plugins/ || true
+          cp plugins/feishu-plugin/plugin.toml release/plugins/feishu-plugin.toml || true
+          cp plugins/cloudflare-tunnel/plugin.toml release/plugins/cloudflare-tunnel.toml || true
+          cd release && tar czf rtb-${{ matrix.name }}.tar.gz rtb plugins/
       - uses: softprops/action-gh-release@v2
         with:
-          files: release/${{ matrix.name }}.tar.gz
+          files: release/rtb-${{ matrix.name }}.tar.gz

@@ -6,8 +6,12 @@ on:
   pull_request:
     branches: [master]
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   check:
+    name: Rust Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,18 +21,39 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Format check
         run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+      - name: Clippy (workspace, exclude tauri-app)
+        run: cargo clippy --workspace --exclude rtb-desktop -- -D warnings
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude rtb-desktop
+
+  plugins:
+    name: Plugins Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy plugins
+        run: |
+          cargo clippy --manifest-path plugins/feishu-plugin/Cargo.toml -- -D warnings
+          cargo clippy --manifest-path plugins/cloudflare-tunnel/Cargo.toml -- -D warnings
+      - name: Build plugins
+        run: |
+          cargo build --manifest-path plugins/feishu-plugin/Cargo.toml
+          cargo build --manifest-path plugins/cloudflare-tunnel/Cargo.toml
 
   frontend:
+    name: Frontend Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
       - name: Install deps
         run: cd web && npm ci
       - name: Build
