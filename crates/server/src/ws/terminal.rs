@@ -167,9 +167,15 @@ async fn handle_terminal(
             result = live_rx.recv() => {
                 match result {
                     Ok(data) => {
-                        if ws_tx.send(Message::Binary(data.into())).await.is_err() {
-                            debug!(session_id = %session_id, "failed to send PTY output, closing");
-                            break;
+                        match tokio::time::timeout(
+                            Duration::from_millis(100),
+                            ws_tx.send(Message::Binary(data.into()))
+                        ).await {
+                            Ok(Ok(())) => {}
+                            _ => {
+                                warn!(session_id = %session_id, "send timeout or error, closing for reconnect");
+                                break;
+                            }
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -179,10 +185,11 @@ async fn handle_terminal(
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         // PTY session ended — the broadcast sender was dropped
                         debug!(session_id = %session_id, "PTY broadcast channel closed, closing WebSocket");
-                        let msg = serde_json::json!({
-                            "type": "exit",
-                            "code": 0,
-                        });
+                        let code = match &*status_rx.borrow() {
+                            rtb_core::pty::session::PtyStatus::Exited(c) => *c,
+                            _ => 0,
+                        };
+                        let msg = serde_json::json!({"type": "exit", "code": code});
                         let _ = ws_tx.send(Message::Text(msg.to_string().into())).await;
                         break;
                     }

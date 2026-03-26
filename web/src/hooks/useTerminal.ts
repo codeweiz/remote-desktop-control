@@ -11,6 +11,7 @@ import { getWsUrl } from '../lib/websocket'
 interface UseTerminalOptions {
   sessionId: string | null
   fontSize?: number
+  isMobile?: boolean
 }
 
 interface UseTerminalReturn {
@@ -24,7 +25,7 @@ interface UseTerminalReturn {
   findPrevious: (term: string) => void
 }
 
-export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): UseTerminalReturn {
+export function useTerminal({ sessionId, fontSize = 14, isMobile }: UseTerminalOptions): UseTerminalReturn {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -111,6 +112,7 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
       cursorStyle: 'bar',
       scrollback: 0,
       allowProposedApi: true,
+      disableStdin: isMobile ?? false,
     })
 
     // Addons
@@ -184,6 +186,8 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
       if (event.data instanceof ArrayBuffer) {
         // Binary frame -> PTY output, write directly
         terminal.write(new Uint8Array(event.data))
+      } else if (event.data instanceof Blob) {
+        event.data.arrayBuffer().then(buf => terminal.write(new Uint8Array(buf)))
       } else if (typeof event.data === 'string') {
         // Text frame -> control message (JSON)
         try {
@@ -244,7 +248,7 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
       setConnectionState('disconnected')
       setSearchVisible(false)
     }
-  }, [sessionId, fontSize])
+  }, [sessionId, fontSize, isMobile])
 
   return { containerRef, connectionState, fitTerminal, sendData, searchVisible, setSearchVisible, findNext, findPrevious }
 }

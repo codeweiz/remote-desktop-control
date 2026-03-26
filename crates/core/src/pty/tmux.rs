@@ -113,27 +113,31 @@ pub fn session_name(session_id: &str) -> String {
 
 /// Create a new detached tmux session.
 ///
-/// Sets `TERM=xterm-256color` and `COLORTERM=truecolor` inside the session
-/// via `tmux set-environment` (compatible with tmux >= 2.6, unlike `-e`
-/// which requires 3.2+).
+/// Sets `TERM=xterm-256color` and `COLORTERM=truecolor` on the parent
+/// process so that tmux inherits them for the initial shell. This is more
+/// reliable than `set-environment` which doesn't affect already-running
+/// shells.
 pub fn new_session(session_id: &str, cwd: &Path) -> Result<()> {
     let name = session_name(session_id);
     let cwd_str = cwd.to_string_lossy();
 
     info!(session = %name, cwd = %cwd_str, "creating tmux session");
 
-    run_tmux_ok(&[
-        "new-session",
-        "-d",
-        "-s",
-        &name,
-        "-c",
-        &cwd_str,
-    ])?;
+    let output = Command::new("tmux")
+        .env("TERM", "xterm-256color")
+        .env("COLORTERM", "truecolor")
+        .args(["new-session", "-d", "-s", &name, "-c", &cwd_str])
+        .output()
+        .context("failed to execute tmux new-session")?;
 
-    // Set environment variables inside the new session.
-    run_tmux_ok(&["set-environment", "-t", &name, "TERM", "xterm-256color"])?;
-    run_tmux_ok(&["set-environment", "-t", &name, "COLORTERM", "truecolor"])?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "tmux new-session failed (exit {}): {}",
+            output.status,
+            stderr.trim()
+        );
+    }
 
     debug!(session = %name, "tmux session created and environment configured");
     Ok(())
@@ -231,10 +235,22 @@ pub fn resize_pane(session_id: &str, cols: u16, rows: u16) -> Result<()> {
 /// Capture the visible contents of the tmux pane.
 ///
 /// Returns the raw stdout bytes from `tmux capture-pane -p`.
+/// Tries with `-e` first (escape sequences, tmux 3.1+), then falls back
+/// to plain capture for older tmux versions.
 pub fn capture_pane(session_id: &str) -> Result<Vec<u8>> {
     let name = session_name(session_id);
     debug!(session = %name, "capturing tmux pane");
 
+    // Try with -e (escape sequences, tmux 3.1+) first
+    let output = Command::new("tmux")
+        .args(["capture-pane", "-t", &name, "-p", "-e"])
+        .output()
+        .context("failed to execute tmux capture-pane")?;
+    if output.status.success() {
+        return Ok(output.stdout);
+    }
+
+    // Fallback without -e for older tmux
     let output = run_tmux_ok(&["capture-pane", "-t", &name, "-p"])?;
     Ok(output.stdout)
 }
