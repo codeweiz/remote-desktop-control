@@ -61,7 +61,6 @@ pub enum ControlEvent {
 pub enum DataEvent {
     PtyOutput { seq: u64, data: Bytes },
     PtyExited { exit_code: i32 },
-    PtyResized { cols: u16, rows: u16 },
     AgentMessage { seq: u64, content: AgentContent },
     AgentToolUse { seq: u64, tool: String, input: serde_json::Value },
 }

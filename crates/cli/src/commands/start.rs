@@ -65,6 +65,9 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
     // 6. Initialize core
     let core = Arc::new(CoreState::new(config.clone())?);
 
+    // 6b. Clean up any orphan tmux sessions from a previous crash
+    core.pty_manager.cleanup_orphans();
+
     // 7. Load tasks from disk into the task pool
     if let Err(e) = core.task_pool.load().await {
         tracing::warn!(error = %e, "Failed to load task pool from disk (continuing with empty pool)");

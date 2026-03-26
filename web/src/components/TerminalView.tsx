@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Box, Paper, IconButton, Typography } from '@mui/material'
 import {
   Close as CloseIcon,
@@ -11,17 +12,25 @@ import { SearchBar } from './SearchBar'
 interface TerminalViewProps {
   sessionId: string | null
   fontSize?: number
+  /** Called when the terminal's sendData function becomes available. */
+  onSendReady?: (send: (data: string) => void) => void
 }
 
-export function TerminalView({ sessionId, fontSize = 14 }: TerminalViewProps) {
+export function TerminalView({ sessionId, fontSize = 14, onSendReady }: TerminalViewProps) {
   const {
     containerRef,
     connectionState,
+    sendData,
     searchVisible,
     setSearchVisible,
     findNext,
     findPrevious,
   } = useTerminal({ sessionId, fontSize })
+
+  // Notify parent when sendData is available
+  useEffect(() => {
+    onSendReady?.(sendData)
+  }, [sendData, onSendReady])
 
   return (
     <Box

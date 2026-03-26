@@ -5,22 +5,18 @@ use axum::{
     },
     response::IntoResponse,
 };
-use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, warn};
 
 use crate::state::AppState;
-use rtb_core::events::DataEvent;
 
 /// Query parameters for the terminal WebSocket endpoint.
 #[derive(Debug, Deserialize)]
 pub struct TerminalParams {
     pub session: String,
     pub token: String,
-    /// If provided, replay missed events from the ring buffer starting after this sequence.
-    pub last_seq: Option<u64>,
 }
 
 /// JSON command from the client (text frames).
@@ -29,6 +25,11 @@ pub struct TerminalParams {
 enum ClientCommand {
     #[serde(rename = "resize")]
     Resize { cols: u16, rows: u16 },
+    #[serde(rename = "keepalive")]
+    Keepalive {
+        #[allow(dead_code)]
+        client_time: Option<i64>,
+    },
 }
 
 /// Terminal WebSocket upgrade handler.
@@ -61,92 +62,43 @@ pub async fn ws_terminal(
             .into_response();
     }
 
-    let last_seq = params.last_seq;
-
-    // 5. Upgrade to WebSocket
-    ws.on_upgrade(move |socket| handle_terminal(socket, state, session_id, last_seq))
+    // 3. Upgrade to WebSocket
+    ws.on_upgrade(move |socket| handle_terminal(socket, state, session_id))
 }
 
 /// Main terminal WebSocket loop after upgrade.
+///
+/// - Sends initial screen content via `capture-pane` on connect (anti-reconnect-storm).
+/// - Forwards PTY output to client as Binary frames.
+/// - Client input (Binary frames) is written to the PTY stdin.
+/// - JSON text frames are parsed as commands (resize, keepalive).
+/// - Monitors session status for exit notification.
+/// - Closes on lag so the client can reconnect cleanly.
 async fn handle_terminal(
     socket: WebSocket,
     state: AppState,
     session_id: String,
-    last_seq: Option<u64>,
 ) {
-    info!(session_id = %session_id, last_seq = ?last_seq, "terminal WebSocket connected");
+    info!(session_id = %session_id, "terminal WebSocket connected");
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    // 3. Subscribe to session data channel via EventBus
-    let mut data_rx = state.core.event_bus.create_data_subscriber(&session_id);
+    // Lookup session and subscribe to channels
+    let session = match state.core.pty_manager.get_session(&session_id) {
+        Some(s) => s,
+        None => {
+            warn!(session_id = %session_id, "session disappeared before WebSocket setup");
+            return;
+        }
+    };
+    let mut live_rx = session.subscribe();
+    let mut status_rx = session.subscribe_status();
 
-    // 4. If last_seq provided, replay missed events from ring buffer.
-    //    If the requested seq is older than the ring buffer's oldest entry,
-    //    send a replay_gap indicator first so the client knows about the gap.
-    if let Some(seq) = last_seq {
-        if let Some(session) = state.core.pty_manager.get_session(&session_id) {
-            let ring = session.buffer();
-
-            // Detect gap: if the client's last_seq is before the ring buffer's
-            // oldest entry, there are events we can no longer replay.
-            if let Some(first_available) = ring.first_seq() {
-                if seq < first_available.saturating_sub(1) {
-                    let gap_msg = serde_json::json!({
-                        "type": "replay_gap",
-                        "missed_from": seq,
-                        "available_from": first_available,
-                    });
-                    if ws_tx
-                        .send(Message::Text(gap_msg.to_string().into()))
-                        .await
-                        .is_err()
-                    {
-                        warn!(session_id = %session_id, "failed to send replay_gap, closing");
-                        return;
-                    }
-                    debug!(
-                        session_id = %session_id,
-                        missed_from = seq,
-                        available_from = first_available,
-                        "sent replay_gap indicator"
-                    );
-                }
-            }
-
-            let missed = ring.get_since(seq);
-            let mut replayed_last_seq = seq;
-
-            for (event_seq, data) in missed {
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-                let msg = serde_json::json!({
-                    "type": "output",
-                    "seq": event_seq,
-                    "data": b64,
-                });
-                if ws_tx
-                    .send(Message::Text(msg.to_string().into()))
-                    .await
-                    .is_err()
-                {
-                    warn!(session_id = %session_id, "failed to send replay data, closing");
-                    return;
-                }
-                replayed_last_seq = event_seq;
-            }
-
-            // Send replay_done marker
-            let done_msg = serde_json::json!({
-                "type": "replay_done",
-                "last_seq": replayed_last_seq,
-            });
-            if ws_tx
-                .send(Message::Text(done_msg.to_string().into()))
-                .await
-                .is_err()
-            {
-                return;
-            }
+    // Capture-pane on connect: send current screen content so a reconnecting
+    // client gets a full screen immediately without waiting for new output.
+    if let Ok(initial) = rtb_core::pty::tmux::capture_pane(&session_id) {
+        if !initial.is_empty() {
+            let _ = ws_tx.send(Message::Binary(initial.into())).await;
         }
     }
 
@@ -172,7 +124,7 @@ async fn handle_terminal(
                         }
                     }
                     Some(Ok(Message::Text(text))) => {
-                        // JSON command (e.g. resize)
+                        // JSON command (resize, keepalive, etc.)
                         match serde_json::from_str::<ClientCommand>(&text) {
                             Ok(ClientCommand::Resize { cols, rows }) => {
                                 debug!(session_id = %session_id, cols, rows, "resize request");
@@ -180,8 +132,17 @@ async fn handle_terminal(
                                     warn!(session_id = %session_id, error = %e, "failed to resize PTY");
                                 }
                             }
+                            Ok(ClientCommand::Keepalive { .. }) => {
+                                let ack = serde_json::json!({
+                                    "type": "keepalive_ack",
+                                    "server_time": chrono::Utc::now().timestamp_millis(),
+                                });
+                                let _ = ws_tx.send(Message::Text(ack.to_string().into())).await;
+                            }
                             Err(e) => {
-                                warn!(session_id = %session_id, error = %e, text = %text, "unknown client command");
+                                // Unknown text command — log and ignore.
+                                // PTY input comes via Binary frames only.
+                                warn!(session_id = %session_id, error = %e, text = %text, "unknown client command, ignoring");
                             }
                         }
                     }
@@ -202,38 +163,46 @@ async fn handle_terminal(
                 }
             }
 
-            // Outgoing data event from the PTY
-            event = data_rx.recv() => {
-                match event {
-                    Some(DataEvent::PtyOutput { seq, data }) => {
-                        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-                        let msg = serde_json::json!({
-                            "type": "output",
-                            "seq": seq,
-                            "data": b64,
-                        });
-                        if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
-                            debug!(session_id = %session_id, "failed to send PTY output, closing");
-                            break;
+            // Live output from the PTY broadcast channel — send as Binary frame
+            result = live_rx.recv() => {
+                match result {
+                    Ok(data) => {
+                        match tokio::time::timeout(
+                            Duration::from_millis(100),
+                            ws_tx.send(Message::Binary(data.into()))
+                        ).await {
+                            Ok(Ok(())) => {}
+                            _ => {
+                                warn!(session_id = %session_id, "send timeout or error, closing for reconnect");
+                                break;
+                            }
                         }
                     }
-                    Some(DataEvent::PtyExited { exit_code }) => {
-                        let msg = serde_json::json!({
-                            "type": "exit",
-                            "code": exit_code,
-                        });
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(session_id = %session_id, skipped = n, "client lagging, closing for reconnect");
+                        break;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // PTY session ended — the broadcast sender was dropped
+                        debug!(session_id = %session_id, "PTY broadcast channel closed, closing WebSocket");
+                        let code = match &*status_rx.borrow() {
+                            rtb_core::pty::session::PtyStatus::Exited(c) => *c,
+                            _ => 0,
+                        };
+                        let msg = serde_json::json!({"type": "exit", "code": code});
                         let _ = ws_tx.send(Message::Text(msg.to_string().into())).await;
-                        info!(session_id = %session_id, exit_code, "PTY exited, closing WebSocket");
                         break;
                     }
-                    Some(_) => {
-                        // Ignore other data events (agent messages, etc.)
-                    }
-                    None => {
-                        // Data channel closed (session removed)
-                        debug!(session_id = %session_id, "data channel closed, closing WebSocket");
-                        break;
-                    }
+                }
+            }
+
+            // Session status watch — notify client on exit
+            _ = status_rx.changed() => {
+                let status = status_rx.borrow().clone();
+                if let rtb_core::pty::session::PtyStatus::Exited(code) = status {
+                    let msg = serde_json::json!({"type": "exit", "code": code});
+                    let _ = ws_tx.send(Message::Text(msg.to_string().into())).await;
+                    break;
                 }
             }
 

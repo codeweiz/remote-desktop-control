@@ -36,7 +36,6 @@ fn api_routes() -> Router<AppState> {
         .route("/sessions", get(sessions::list_sessions))
         .route("/sessions", post(sessions::create_session))
         .route("/sessions/{id}", delete(sessions::delete_session))
-        .route("/sessions/{id}/buffer", get(sessions::get_session_buffer))
         .route("/sessions/{id}/input", post(sessions::send_session_input))
         // Notifications
         .route("/notifications", get(notifications::list_notifications))

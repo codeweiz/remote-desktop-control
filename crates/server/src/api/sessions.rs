@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -168,14 +168,13 @@ pub async fn create_session(
         }
         _ => {
             // Default: terminal session
-            let shell = body.shell.as_deref();
             let cwd = body.cwd.as_ref().map(PathBuf::from);
             let cwd_ref = cwd.as_deref();
 
             match state
                 .core
                 .pty_manager
-                .create_session(&body.name, shell, cwd_ref)
+                .create_session(&body.name, cwd_ref)
                 .await
             {
                 Ok(id) => (
@@ -235,61 +234,6 @@ pub async fn delete_session(
             }
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Session buffer
-// ---------------------------------------------------------------------------
-
-/// Query parameters for the session buffer endpoint.
-#[derive(Debug, Deserialize)]
-pub struct BufferQuery {
-    /// Only return entries with sequence number greater than this value.
-    pub since_seq: Option<u64>,
-}
-
-/// A single buffer entry returned by the buffer endpoint.
-#[derive(Serialize)]
-pub struct BufferEntry {
-    pub seq: u64,
-    pub data: String,
-}
-
-/// GET /api/v1/sessions/:id/buffer — get session event buffer.
-///
-/// Returns the ring buffer contents, optionally filtered by `since_seq`.
-pub async fn get_session_buffer(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Query(params): Query<BufferQuery>,
-) -> impl IntoResponse {
-    let session = match state.core.pty_manager.get_session(&id) {
-        Some(s) => s,
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(ErrorBody {
-                    error: format!("session not found: {}", id),
-                }),
-            )
-                .into_response()
-        }
-    };
-
-    let entries = match params.since_seq {
-        Some(seq) => session.buffer().get_since(seq),
-        None => session.buffer().get_last_n(500), // default: last 500 entries
-    };
-
-    let result: Vec<BufferEntry> = entries
-        .into_iter()
-        .map(|(seq, data)| BufferEntry {
-            seq,
-            data: String::from_utf8_lossy(&data).into_owned(),
-        })
-        .collect();
-
-    Json(result).into_response()
 }
 
 // ---------------------------------------------------------------------------

@@ -1,123 +1,36 @@
-use bytes::Bytes;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rtb_core::pty::buffer::RingBuffer;
 use rtb_core::pty::manager::PtyManager;
 
-// ---------------------------------------------------------------------------
-// RingBuffer tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_ring_buffer_push_and_read() {
-    let buf = RingBuffer::new(10);
-
-    buf.push(1, Bytes::from("hello"));
-    buf.push(2, Bytes::from("world"));
-
-    assert_eq!(buf.len(), 2);
-    assert_eq!(buf.last_seq(), 2);
-
-    let items = buf.get_last_n(10);
-    assert_eq!(items.len(), 2);
-    assert_eq!(items[0].0, 1);
-    assert_eq!(items[0].1, Bytes::from("hello"));
-    assert_eq!(items[1].0, 2);
-    assert_eq!(items[1].1, Bytes::from("world"));
-}
-
-#[test]
-fn test_ring_buffer_capacity() {
-    let buf = RingBuffer::new(3);
-
-    buf.push(1, Bytes::from("a"));
-    buf.push(2, Bytes::from("b"));
-    buf.push(3, Bytes::from("c"));
-    buf.push(4, Bytes::from("d"));
-    buf.push(5, Bytes::from("e"));
-
-    // Capacity is 3, so oldest items (seq 1, 2) should be evicted
-    assert_eq!(buf.len(), 3);
-    assert_eq!(buf.last_seq(), 5);
-
-    let items = buf.get_last_n(10);
-    assert_eq!(items.len(), 3);
-    assert_eq!(items[0].0, 3);
-    assert_eq!(items[1].0, 4);
-    assert_eq!(items[2].0, 5);
-}
-
-#[test]
-fn test_ring_buffer_get_since() {
-    let buf = RingBuffer::new(10);
-
-    buf.push(1, Bytes::from("a"));
-    buf.push(2, Bytes::from("b"));
-    buf.push(3, Bytes::from("c"));
-    buf.push(4, Bytes::from("d"));
-    buf.push(5, Bytes::from("e"));
-
-    // Get events with seq > 3
-    let items = buf.get_since(3);
-    assert_eq!(items.len(), 2);
-    assert_eq!(items[0].0, 4);
-    assert_eq!(items[0].1, Bytes::from("d"));
-    assert_eq!(items[1].0, 5);
-    assert_eq!(items[1].1, Bytes::from("e"));
-
-    // Get events with seq > 0 (all events)
-    let items = buf.get_since(0);
-    assert_eq!(items.len(), 5);
-
-    // Get events with seq > 5 (none)
-    let items = buf.get_since(5);
-    assert_eq!(items.len(), 0);
-
-    // Get events with seq > 100 (none)
-    let items = buf.get_since(100);
-    assert_eq!(items.len(), 0);
-}
-
-#[test]
-fn test_ring_buffer_get_last_n() {
-    let buf = RingBuffer::new(10);
-
-    buf.push(1, Bytes::from("a"));
-    buf.push(2, Bytes::from("b"));
-    buf.push(3, Bytes::from("c"));
-
-    let items = buf.get_last_n(2);
-    assert_eq!(items.len(), 2);
-    assert_eq!(items[0].0, 2);
-    assert_eq!(items[1].0, 3);
-
-    // Request more than available
-    let items = buf.get_last_n(100);
-    assert_eq!(items.len(), 3);
-}
-
-#[test]
-fn test_ring_buffer_empty() {
-    let buf = RingBuffer::new(10);
-    assert_eq!(buf.len(), 0);
-    assert_eq!(buf.last_seq(), 0);
-    assert!(buf.get_since(0).is_empty());
-    assert!(buf.get_last_n(5).is_empty());
+/// Skip tests if tmux is not installed (CI environments, etc.)
+fn require_tmux() {
+    if std::process::Command::new("tmux")
+        .arg("-V")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| !s.success())
+        .unwrap_or(true)
+    {
+        eprintln!("SKIP: tmux not found, skipping PTY tests");
+        std::process::exit(0);
+    }
 }
 
 // ---------------------------------------------------------------------------
-// PTY session tests
+// PTY session tests (tmux-backed) — require tmux installed
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_create_pty_session() {
+    require_tmux();
     let event_bus = Arc::new(rtb_core::event_bus::EventBus::new());
     let config = Arc::new(rtb_core::config::Config::default());
     let manager = PtyManager::new(event_bus, config);
 
     let session_id = manager
-        .create_session("test-session", Some("/bin/sh"), None)
+        .create_session("test-session", None)
         .await
         .expect("should create session");
 
@@ -136,21 +49,21 @@ async fn test_create_pty_session() {
 
 #[tokio::test]
 async fn test_pty_output() {
+    require_tmux();
     let event_bus = Arc::new(rtb_core::event_bus::EventBus::new());
     let config = Arc::new(rtb_core::config::Config::default());
     let manager = PtyManager::new(event_bus.clone(), config);
 
     let session_id = manager
-        .create_session("echo-test", Some("/bin/sh"), None)
+        .create_session("echo-test", None)
         .await
         .expect("should create session");
 
-    // Subscribe to data events for this session
-    let mut rx = event_bus.create_data_subscriber(&session_id);
+    // Subscribe to live output from the session's broadcast channel
+    let session = manager.get_session(&session_id).expect("session should exist");
+    let mut rx = session.subscribe();
 
     // Give the shell a moment to start up, then send the echo command.
-    // Retry the write a few times because the shell may need extra time
-    // in resource-constrained environments (CI, heavy load, etc.).
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     for attempt in 0..3 {
@@ -169,22 +82,16 @@ async fn test_pty_output() {
                 break;
             }
             match tokio::time::timeout(remaining, rx.recv()).await {
-                Ok(Some(rtb_core::events::DataEvent::PtyOutput { data, .. })) => {
+                Ok(Ok(data)) => {
                     let text = String::from_utf8_lossy(&data);
                     if text.contains("hello") {
-                        // Success — verify ring buffer also captured output
-                        let session = manager.get_session(&session_id).unwrap();
-                        let buffer_items = session.buffer().get_last_n(100);
-                        assert!(!buffer_items.is_empty(), "ring buffer should have captured output");
-
                         // Cleanup
                         manager.kill_session(&session_id).await.expect("should kill session");
                         return; // PASS
                     }
                 }
-                Ok(Some(_)) => { /* other event type */ }
-                Ok(None) => break, // channel closed
-                Err(_) => break,   // timeout
+                Ok(Err(_)) => break, // lagged or closed
+                Err(_) => break,     // timeout
             }
         }
     }
@@ -196,17 +103,18 @@ async fn test_pty_output() {
 
 #[tokio::test]
 async fn test_pty_manager_crud() {
+    require_tmux();
     let event_bus = Arc::new(rtb_core::event_bus::EventBus::new());
     let config = Arc::new(rtb_core::config::Config::default());
     let manager = PtyManager::new(event_bus, config);
 
     // Create two sessions
     let id1 = manager
-        .create_session("session-1", Some("/bin/sh"), None)
+        .create_session("session-1", None)
         .await
         .expect("should create session 1");
     let id2 = manager
-        .create_session("session-2", Some("/bin/sh"), None)
+        .create_session("session-2", None)
         .await
         .expect("should create session 2");
 
@@ -248,12 +156,13 @@ async fn test_pty_manager_crud() {
 
 #[tokio::test]
 async fn test_pty_resize() {
+    require_tmux();
     let event_bus = Arc::new(rtb_core::event_bus::EventBus::new());
     let config = Arc::new(rtb_core::config::Config::default());
     let manager = PtyManager::new(event_bus, config);
 
     let session_id = manager
-        .create_session("resize-test", Some("/bin/sh"), None)
+        .create_session("resize-test", None)
         .await
         .expect("should create session");
 

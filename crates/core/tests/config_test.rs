@@ -17,8 +17,6 @@ fn test_default_config() {
     // Session defaults
     assert_eq!(cfg.session.max_age_days, 30);
     assert_eq!(cfg.session.max_storage_mb, 1024);
-    assert_eq!(cfg.session.buffer_size, 5000);
-    assert_eq!(cfg.session.output_coalesce_ms, 0);
     assert_eq!(cfg.session.session_id_length, 12);
 
     // Agent defaults
@@ -72,8 +70,6 @@ ip_whitelist = ["192.168.1.0/24"]
 [session]
 max_age_days = 7
 max_storage_mb = 512
-buffer_size = 10000
-output_coalesce_ms = 50
 session_id_length = 16
 
 [agent]
@@ -122,7 +118,6 @@ max_message_size_bytes = 2097152
     assert_eq!(cfg.server.shell, "/bin/bash");
     assert_eq!(cfg.security.ip_whitelist, vec!["192.168.1.0/24"]);
     assert_eq!(cfg.session.max_age_days, 7);
-    assert_eq!(cfg.session.buffer_size, 10000);
     assert_eq!(cfg.agent.default_provider, "openai");
     assert_eq!(cfg.agent.default_model, "gpt-4");
     assert_eq!(cfg.agent.auto_approve_tools, true);

@@ -2,27 +2,30 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { CanvasAddon } from '@xterm/addon-canvas'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
-import type { ConnectionState, WsMessage } from '../lib/types'
+import type { ConnectionState } from '../lib/types'
 import { getWsUrl } from '../lib/websocket'
 
 interface UseTerminalOptions {
   sessionId: string | null
   fontSize?: number
+  isMobile?: boolean
 }
 
 interface UseTerminalReturn {
   containerRef: React.RefObject<HTMLDivElement | null>
   connectionState: ConnectionState
   fitTerminal: () => void
+  sendData: (data: string) => void
   searchVisible: boolean
   setSearchVisible: (visible: boolean) => void
   findNext: (term: string) => void
   findPrevious: (term: string) => void
 }
 
-export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): UseTerminalReturn {
+export function useTerminal({ sessionId, fontSize = 14, isMobile }: UseTerminalOptions): UseTerminalReturn {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -53,6 +56,13 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
     }
   }, [])
 
+  /** Send raw data to the PTY via WebSocket (used by MobileInputBar). */
+  const sendData = useCallback((data: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(new TextEncoder().encode(data))
+    }
+  }, [])
+
   // Ctrl+Shift+F keyboard shortcut for search
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -73,7 +83,7 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
     // Create terminal instance
     const terminal = new Terminal({
       fontSize,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace",
+      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
       theme: {
         background: '#0d1117',
         foreground: '#c9d1d9',
@@ -99,9 +109,10 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
         brightWhite: '#f0f6fc',
       },
       cursorBlink: true,
-      cursorStyle: 'block',
-      scrollback: 10000,
+      cursorStyle: 'bar',
+      scrollback: 0,
       allowProposedApi: true,
+      disableStdin: isMobile ?? false,
     })
 
     // Addons
@@ -118,15 +129,16 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
     // Open terminal in DOM
     terminal.open(container)
 
-    // Try WebGL renderer, fall back gracefully
+    // Renderer fallback chain: WebGL -> Canvas -> DOM
     try {
       const webglAddon = new WebglAddon()
       webglAddon.onContextLoss(() => {
         webglAddon.dispose()
+        try { terminal.loadAddon(new CanvasAddon()) } catch { /* DOM fallback */ }
       })
       terminal.loadAddon(webglAddon)
     } catch {
-      // WebGL not available, using default canvas renderer
+      try { terminal.loadAddon(new CanvasAddon()) } catch { /* DOM fallback */ }
     }
 
     // Initial fit
@@ -150,6 +162,7 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
     const url = getWsUrl('/ws/terminal?session=' + sessionId)
     setConnectionState('connecting')
     const ws = new WebSocket(url)
+    ws.binaryType = 'arraybuffer' // MUST be before onmessage
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -170,22 +183,21 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
     }
 
     ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data) as WsMessage
-        if (msg.type === 'output' && typeof msg.data === 'string') {
-          // Decode base64 output to Uint8Array and write to terminal
-          const binary = atob(msg.data as string)
-          const bytes = new Uint8Array(binary.length)
-          for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i)
+      if (event.data instanceof ArrayBuffer) {
+        // Binary frame -> PTY output, write directly
+        terminal.write(new Uint8Array(event.data))
+      } else if (event.data instanceof Blob) {
+        event.data.arrayBuffer().then(buf => terminal.write(new Uint8Array(buf)))
+      } else if (typeof event.data === 'string') {
+        // Text frame -> control message (JSON)
+        try {
+          const msg = JSON.parse(event.data)
+          if (msg.type === 'exit') {
+            terminal.writeln(`\r\n[Process exited with code ${msg.code}]`)
+          } else if (msg.type === 'keepalive_ack') {
+            // Connection health — could update latency display
           }
-          terminal.write(bytes)
-        }
-      } catch {
-        // Raw text fallback
-        if (typeof event.data === 'string') {
-          terminal.write(event.data)
-        }
+        } catch { /* ignore */ }
       }
     }
 
@@ -197,11 +209,17 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
       setConnectionState('disconnected')
     }
 
+    // Keepalive — every 10 seconds
+    const keepaliveInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'keepalive', client_time: Date.now() }))
+      }
+    }, 10000)
+
     // Terminal input -> WebSocket (send as binary for raw PTY input)
     const inputDisposable = terminal.onData((data: string) => {
       if (ws.readyState === WebSocket.OPEN) {
-        const encoder = new TextEncoder()
-        ws.send(encoder.encode(data))
+        ws.send(new TextEncoder().encode(data))
       }
     })
 
@@ -217,6 +235,7 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
     })
 
     return () => {
+      clearInterval(keepaliveInterval)
       resizeObserver.disconnect()
       inputDisposable.dispose()
       resizeDisposable.dispose()
@@ -229,7 +248,7 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
       setConnectionState('disconnected')
       setSearchVisible(false)
     }
-  }, [sessionId, fontSize])
+  }, [sessionId, fontSize, isMobile])
 
-  return { containerRef, connectionState, fitTerminal, searchVisible, setSearchVisible, findNext, findPrevious }
+  return { containerRef, connectionState, fitTerminal, sendData, searchVisible, setSearchVisible, findNext, findPrevious }
 }

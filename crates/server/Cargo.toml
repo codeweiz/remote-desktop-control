@@ -25,6 +25,5 @@ dashmap.workspace = true
 rust-embed = "8"
 mime_guess = "2"
 tokio-tungstenite = "0.26"
-base64 = "0.22"
 futures-util = "0.3"
 nanoid.workspace = true

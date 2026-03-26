@@ -37,8 +37,6 @@ pub struct SecurityConfig {
 pub struct SessionConfig {
     pub max_age_days: u32,
     pub max_storage_mb: u32,
-    pub buffer_size: usize,
-    pub output_coalesce_ms: u64,
     pub session_id_length: usize,
 }
 
@@ -134,8 +132,6 @@ impl Default for SessionConfig {
         Self {
             max_age_days: 30,
             max_storage_mb: 1024,
-            buffer_size: 5000,
-            output_coalesce_ms: 0,
             session_id_length: 12,
         }
     }
@@ -419,16 +415,6 @@ impl Config {
         if let Ok(v) = std::env::var("RTB_SESSION_MAX_STORAGE_MB") {
             if let Ok(p) = v.parse() {
                 self.session.max_storage_mb = p;
-            }
-        }
-        if let Ok(v) = std::env::var("RTB_SESSION_BUFFER_SIZE") {
-            if let Ok(p) = v.parse() {
-                self.session.buffer_size = p;
-            }
-        }
-        if let Ok(v) = std::env::var("RTB_SESSION_OUTPUT_COALESCE_MS") {
-            if let Ok(p) = v.parse() {
-                self.session.output_coalesce_ms = p;
             }
         }
         if let Ok(v) = std::env::var("RTB_SESSION_SESSION_ID_LENGTH") {
