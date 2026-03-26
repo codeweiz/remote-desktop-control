@@ -135,7 +135,7 @@ impl Default for SessionConfig {
             max_age_days: 30,
             max_storage_mb: 1024,
             buffer_size: 5000,
-            output_coalesce_ms: 100,
+            output_coalesce_ms: 0,
             session_id_length: 12,
         }
     }

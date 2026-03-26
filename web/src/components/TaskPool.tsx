@@ -15,6 +15,7 @@ import {
   Add as AddIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
+  Delete as DeleteIcon,
   Checklist as TaskListIcon,
   Refresh as RefreshIcon,
 } from '@mui/icons-material'
@@ -44,10 +45,12 @@ function TaskItem({
   task,
   onApprove,
   onCancel,
+  onDelete,
 }: {
   task: Task
   onApprove: () => void
   onCancel: () => void
+  onDelete: () => void
 }) {
   const pColor = priorityColor(task.priority)
   const sColor = statusColor(task.status)
@@ -127,6 +130,9 @@ function TaskItem({
             <CancelIcon sx={{ fontSize: 14, color: 'error.main' }} />
           </IconButton>
         )}
+        <IconButton size="small" onClick={onDelete} title="Delete" sx={{ p: 0.25 }}>
+          <DeleteIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+        </IconButton>
       </Box>
     </Box>
   )
@@ -201,7 +207,7 @@ function AddTaskDialog({
 }
 
 export function TaskPool() {
-  const { tasks, loading, addTask, approveTask, cancelTask, refresh } = useTaskPool()
+  const { tasks, loading, addTask, approveTask, cancelTask, removeTask, refresh } = useTaskPool()
   const [expanded, setExpanded] = useState(false)
   const [showAddDialog, setShowAddDialog] = useState(false)
 
@@ -325,6 +331,7 @@ export function TaskPool() {
                 task={task}
                 onApprove={() => approveTask(task.id)}
                 onCancel={() => cancelTask(task.id)}
+                onDelete={() => removeTask(task.id)}
               />
             ))
           )}

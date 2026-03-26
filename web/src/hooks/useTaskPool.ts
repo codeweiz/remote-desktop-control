@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Task, TaskCreateRequest } from '../lib/types'
-import { getTasks, createTask, updateTask } from '../lib/api'
+import { getTasks, createTask, updateTask, deleteTask as apiDeleteTask } from '../lib/api'
 
 export function useTaskPool() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -46,10 +46,19 @@ export function useTaskPool() {
 
   const cancelTask = useCallback(async (id: string) => {
     try {
-      const updated = await updateTask(id, { status: 'Cancelled' })
-      setTasks(prev => prev.map(t => t.id === id ? updated : t))
+      await apiDeleteTask(id)
+      setTasks(prev => prev.filter(t => t.id !== id))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to cancel task')
+    }
+  }, [])
+
+  const removeTask = useCallback(async (id: string) => {
+    try {
+      await apiDeleteTask(id)
+      setTasks(prev => prev.filter(t => t.id !== id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete task')
     }
   }, [])
 
@@ -60,6 +69,7 @@ export function useTaskPool() {
     addTask,
     approveTask,
     cancelTask,
+    removeTask,
     refresh: fetchTasks,
   }
 }

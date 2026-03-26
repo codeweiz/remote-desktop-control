@@ -126,6 +126,13 @@ export async function updateTask(id: string, update: Partial<Task>): Promise<Tas
   })
 }
 
+/** Delete a task */
+export async function deleteTask(id: string): Promise<void> {
+  return apiFetch<void>(`/api/v1/tasks/${id}`, {
+    method: 'DELETE',
+  })
+}
+
 /** Rename a session */
 export async function renameSession(id: string, name: string): Promise<Session> {
   return apiFetch<Session>(`/api/v1/sessions/${id}`, {

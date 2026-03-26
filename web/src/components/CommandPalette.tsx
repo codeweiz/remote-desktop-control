@@ -12,7 +12,6 @@ import {
 } from '@mui/material'
 import {
   Terminal as TerminalIcon,
-  SmartToy as BotIcon,
   Search as SearchIcon,
   ArrowForward as ArrowRightIcon,
   Keyboard as KeyboardIcon,
@@ -31,14 +30,12 @@ interface CommandPaletteProps {
   open: boolean
   onClose: () => void
   onNewTerminal: () => void
-  onNewAgent: () => void
 }
 
 export function CommandPalette({
   open,
   onClose,
   onNewTerminal,
-  onNewAgent,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -52,14 +49,7 @@ export function CommandPalette({
       icon: <TerminalIcon sx={{ fontSize: 18 }} />,
       action: () => { onNewTerminal(); onClose() },
     },
-    {
-      id: 'new-agent',
-      label: 'New Agent',
-      description: 'Create a new agent session',
-      icon: <BotIcon sx={{ fontSize: 18 }} />,
-      action: () => { onNewAgent(); onClose() },
-    },
-  ], [onNewTerminal, onNewAgent, onClose])
+  ], [onNewTerminal, onClose])
 
   // Fuzzy filter
   const filtered = useMemo(() => {

@@ -15,7 +15,9 @@ use crate::events::DataEvent;
 use super::buffer::RingBuffer;
 
 /// Default output coalescing window in milliseconds.
-const DEFAULT_COALESCE_MS: u64 = 100;
+/// Set to 0 to disable coalescing and flush PTY output immediately,
+/// which provides the most responsive interactive terminal experience.
+const DEFAULT_COALESCE_MS: u64 = 0;
 
 /// Status of a PTY session.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]

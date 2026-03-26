@@ -18,7 +18,7 @@ fn test_default_config() {
     assert_eq!(cfg.session.max_age_days, 30);
     assert_eq!(cfg.session.max_storage_mb, 1024);
     assert_eq!(cfg.session.buffer_size, 5000);
-    assert_eq!(cfg.session.output_coalesce_ms, 100);
+    assert_eq!(cfg.session.output_coalesce_ms, 0);
     assert_eq!(cfg.session.session_id_length, 12);
 
     // Agent defaults

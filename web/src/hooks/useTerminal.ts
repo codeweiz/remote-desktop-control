@@ -154,25 +154,31 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
 
     ws.onopen = () => {
       setConnectionState('connected')
-      terminal.focus()
-
-      // Send initial size
-      const dims = fitAddon.proposeDimensions()
-      if (dims) {
-        ws.send(JSON.stringify({
-          type: 'resize',
-          cols: dims.cols,
-          rows: dims.rows,
-        }))
-      }
+      // Wait for DOM to settle before fitting and sending resize
+      setTimeout(() => {
+        fitAddon.fit()
+        terminal.focus()
+        const dims = fitAddon.proposeDimensions()
+        if (dims) {
+          ws.send(JSON.stringify({
+            type: 'resize',
+            cols: dims.cols,
+            rows: dims.rows,
+          }))
+        }
+      }, 100)
     }
 
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data) as WsMessage
         if (msg.type === 'output' && typeof msg.data === 'string') {
-          // Decode base64 output and write to terminal
-          const bytes = atob(msg.data)
+          // Decode base64 output to Uint8Array and write to terminal
+          const binary = atob(msg.data as string)
+          const bytes = new Uint8Array(binary.length)
+          for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i)
+          }
           terminal.write(bytes)
         }
       } catch {

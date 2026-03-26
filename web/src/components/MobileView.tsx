@@ -17,7 +17,6 @@ import {
 } from '@mui/material'
 import {
   Terminal as TerminalIcon,
-  SmartToy as BotIcon,
   ViewList as ListIcon,
   MoreHoriz as MoreIcon,
   Add as AddIcon,
@@ -28,11 +27,10 @@ import {
 import type { Session, SessionCreateRequest } from '../lib/types'
 import type { SessionTree } from '../hooks/useSessions'
 import { TerminalView } from './TerminalView'
-import { AgentDrawer } from './AgentDrawer'
 import { QRCodeModal } from './QRCodeModal'
 import { StatusChip } from './StatusChip'
 
-type MobileTab = 'sessions' | 'terminal' | 'agent' | 'more'
+type MobileTab = 'sessions' | 'terminal' | 'more'
 
 interface MobileViewProps {
   sessions: Session[]
@@ -59,21 +57,12 @@ export function MobileView({
 
   const handleSelectSession = useCallback((session: Session) => {
     setActiveSession(session)
-    setActiveTab(session.kind === 'agent' ? 'agent' : 'terminal')
+    setActiveTab('terminal')
   }, [])
 
   const handleCreateTerminal = useCallback(async () => {
     try {
       const session = await onCreateSession({ kind: 'terminal' })
-      handleSelectSession(session)
-    } catch {
-      // handled upstream
-    }
-  }, [onCreateSession, handleSelectSession])
-
-  const handleCreateAgent = useCallback(async () => {
-    try {
-      const session = await onCreateSession({ kind: 'agent' })
       handleSelectSession(session)
     } catch {
       // handled upstream
@@ -151,59 +140,9 @@ export function MobileView({
                   </ListItemButton>
                 ))}
               </List>
-
-              {/* Agents */}
-              <Typography
-                variant="overline"
-                sx={{
-                  px: 1,
-                  mt: 1.5,
-                  fontSize: 10,
-                  color: 'text.secondary',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 0.5,
-                }}
-              >
-                <BotIcon sx={{ fontSize: 12 }} />
-                Agents ({tree.agents.length})
-              </Typography>
-              <List dense disablePadding>
-                {tree.agents.map(session => (
-                  <ListItemButton
-                    key={session.id}
-                    onClick={() => handleSelectSession(session)}
-                    selected={activeSession?.id === session.id}
-                    sx={{ borderRadius: 1, mb: 0.25 }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 28 }}>
-                      <CircleIcon
-                        sx={{
-                          fontSize: 8,
-                          color: session.status === 'running' ? '#8b5cf6' : 'text.secondary',
-                        }}
-                      />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={session.name || `agent-${session.id.slice(0, 6)}`}
-                      primaryTypographyProps={{ fontSize: 13, fontWeight: 500 }}
-                    />
-                    <IconButton
-                      size="small"
-                      edge="end"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onDeleteSession(session.id)
-                      }}
-                    >
-                      <DeleteIcon sx={{ fontSize: 14, color: 'error.main' }} />
-                    </IconButton>
-                  </ListItemButton>
-                ))}
-              </List>
             </Box>
 
-            {/* Create buttons */}
+            {/* Create button */}
             <Box sx={{ px: 2, py: 2, display: 'flex', gap: 1 }}>
               <Button
                 variant="outlined"
@@ -217,21 +156,7 @@ export function MobileView({
                   borderColor: 'success.main',
                 }}
               >
-                Terminal
-              </Button>
-              <Button
-                variant="outlined"
-                startIcon={<AddIcon />}
-                onClick={handleCreateAgent}
-                fullWidth
-                sx={{
-                  fontSize: 12,
-                  borderStyle: 'dashed',
-                  color: 'secondary.main',
-                  borderColor: 'secondary.main',
-                }}
-              >
-                Agent
+                New Terminal
               </Button>
             </Box>
           </Box>
@@ -251,32 +176,6 @@ export function MobileView({
                   </Typography>
                   <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
                     Select a terminal session first
-                  </Typography>
-                </Box>
-              </Box>
-            )}
-          </Box>
-        )}
-
-        {/* Agent tab */}
-        {activeTab === 'agent' && (
-          <Box sx={{ height: '100%' }}>
-            {activeSession?.kind === 'agent' ? (
-              <AgentDrawer
-                open={true}
-                session={activeSession}
-                width={window.innerWidth}
-                onClose={() => setActiveTab('sessions')}
-              />
-            ) : (
-              <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Box sx={{ textAlign: 'center' }}>
-                  <BotIcon sx={{ fontSize: 48, color: 'text.secondary', opacity: 0.2, mb: 2 }} />
-                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                    No agent selected
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
-                    Select an agent session first
                   </Typography>
                 </Box>
               </Box>
@@ -320,12 +219,6 @@ export function MobileView({
                   size="small"
                   icon={<TerminalIcon sx={{ fontSize: 12 }} />}
                   label={`${tree.terminals.length} terminals`}
-                  sx={{ fontSize: 11 }}
-                />
-                <Chip
-                  size="small"
-                  icon={<BotIcon sx={{ fontSize: 12 }} />}
-                  label={`${tree.agents.length} agents`}
                   sx={{ fontSize: 11 }}
                 />
               </Box>
@@ -388,11 +281,6 @@ export function MobileView({
             value="terminal"
             label="Terminal"
             icon={<TerminalIcon sx={{ fontSize: 22 }} />}
-          />
-          <BottomNavigationAction
-            value="agent"
-            label="Agent"
-            icon={<BotIcon sx={{ fontSize: 22 }} />}
           />
           <BottomNavigationAction
             value="more"
