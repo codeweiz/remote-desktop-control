@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[lib]
+name = "rtb_desktop"
+crate-type = ["staticlib", "cdylib", "lib"]
+
 [dependencies]
 rtb-core = { path = "../core" }
 rtb-server = { path = "../server" }
