@@ -18,14 +18,14 @@ use super::buffer::RingBuffer;
 const DEFAULT_COALESCE_MS: u64 = 100;
 
 /// Status of a PTY session.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum PtyStatus {
     Running,
     Exited(i32),
 }
 
 /// Lightweight info struct returned by `PtyManager::list_sessions`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PtySessionInfo {
     pub id: String,
     pub name: String,

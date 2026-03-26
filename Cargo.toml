@@ -5,6 +5,7 @@ members = [
     "crates/server",
     "crates/plugin-host",
     "crates/cli",
+    "crates/tauri-app",
 ]
 exclude = [
     "plugins/feishu-plugin",
