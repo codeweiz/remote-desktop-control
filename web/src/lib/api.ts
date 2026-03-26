@@ -1,4 +1,4 @@
-import type { Session, SessionKind, SessionCreateRequest, ServerStatus, Task, TaskCreateRequest } from './types'
+import type { Session, SessionKind, SessionStatus, SessionCreateRequest, ServerStatus, Task, TaskCreateRequest } from './types'
 
 /** Extract and store auth token from URL or localStorage */
 function initToken(): string | null {
@@ -59,21 +59,26 @@ export async function getSessions(): Promise<Session[]> {
 
 /** Create a new session */
 export async function createSession(req: SessionCreateRequest = {}): Promise<Session> {
-  const body = {
-    name: req.name || `session-${Date.now()}`,
+  const body: Record<string, unknown> = {
+    name: req.name || `${req.kind || 'terminal'}-${Date.now()}`,
     type: req.kind || 'terminal',
-    shell: req.shell,
   }
-  const result = await apiFetch<{ id: string }>('/api/v1/sessions', {
+  if (req.kind === 'agent') {
+    body.provider = req.provider || 'claude-code'
+    body.model = req.model || ''
+  } else {
+    body.shell = req.shell
+  }
+  const result = await apiFetch<{ id: string; status?: string; error?: string }>('/api/v1/sessions', {
     method: 'POST',
     body: JSON.stringify(body),
   })
-  // Server only returns { id }, so construct a minimal Session object
+  // Server only returns { id, status?, error? }, so construct a minimal Session object
   return {
     id: result.id,
-    name: body.name,
+    name: body.name as string,
     kind: (req.kind || 'terminal') as SessionKind,
-    status: 'running',
+    status: (result.status === 'crashed' ? 'error' : 'running') as SessionStatus,
     parent_id: null,
     created_at: new Date().toISOString(),
     exit_code: null,

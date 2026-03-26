@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -39,6 +40,10 @@ impl Default for RestartPolicy {
 /// Tracks state for a managed agent session.
 struct ManagedAgent {
     client: AcpClient,
+    /// Human-readable session name.
+    name: String,
+    /// When the agent was created.
+    created_at: DateTime<Utc>,
     #[allow(dead_code)]
     agent_binary: String,
     restart_count: u32,
@@ -75,6 +80,10 @@ impl AgentManager {
     }
 
     /// Create and start a new agent session.
+    ///
+    /// If the agent binary cannot be spawned or initialization fails, the agent
+    /// is still registered in a "crashed" state so the caller can see it in the
+    /// session list and understand what went wrong.
     pub async fn create_agent(
         &self,
         session_id: SessionId,
@@ -99,35 +108,72 @@ impl AgentManager {
             cwd,
         );
 
-        // Resolve the agent binary path.
-        // In a real implementation, this would look up the provider in a registry.
-        // For now, we use the provider name as the binary name.
-        let agent_binary = resolve_agent_binary(provider);
+        let agent_binary = resolve_binary(provider);
+        let created_at = Utc::now();
 
-        // Start the agent
-        client.start(&agent_binary).await?;
+        // Attempt to start the agent. On failure, register it as crashed
+        // so the session is still visible in the list.
+        match client.start(&agent_binary).await {
+            Ok(()) => {
+                // Take the event receiver and start routing events
+                if let Some(event_rx) = client.take_event_rx() {
+                    self.start_event_router(session_id.clone(), event_rx);
+                }
 
-        // Take the event receiver and start routing events
-        if let Some(event_rx) = client.take_event_rx() {
-            self.start_event_router(session_id.clone(), event_rx);
+                let managed = ManagedAgent {
+                    client,
+                    name: name.to_string(),
+                    created_at,
+                    agent_binary,
+                    restart_count: 0,
+                    restart_policy: self.default_restart_policy.clone(),
+                };
+
+                self.agents.insert(session_id.clone(), managed);
+
+                // Publish session creation event
+                self.event_bus.publish_control(ControlEvent::AgentStatusChanged {
+                    session_id,
+                    status: AgentStatus::Ready,
+                });
+
+                Ok(())
+            }
+            Err(e) => {
+                warn!(
+                    session_id = %session_id,
+                    error = %e,
+                    "agent failed to start, registering in crashed state"
+                );
+
+                // Mark client as crashed
+                client.status = AgentStatus::Crashed {
+                    error: e.to_string(),
+                    class: ErrorClass::Permanent,
+                };
+
+                let managed = ManagedAgent {
+                    client,
+                    name: name.to_string(),
+                    created_at,
+                    agent_binary,
+                    restart_count: 0,
+                    restart_policy: self.default_restart_policy.clone(),
+                };
+
+                self.agents.insert(session_id.clone(), managed);
+
+                self.event_bus.publish_control(ControlEvent::AgentStatusChanged {
+                    session_id: session_id.clone(),
+                    status: AgentStatus::Crashed {
+                        error: e.to_string(),
+                        class: ErrorClass::Permanent,
+                    },
+                });
+
+                Err(e)
+            }
         }
-
-        let managed = ManagedAgent {
-            client,
-            agent_binary,
-            restart_count: 0,
-            restart_policy: self.default_restart_policy.clone(),
-        };
-
-        self.agents.insert(session_id.clone(), managed);
-
-        // Publish session creation event
-        self.event_bus.publish_control(ControlEvent::AgentStatusChanged {
-            session_id,
-            status: AgentStatus::Ready,
-        });
-
-        Ok(())
     }
 
     /// Send a message to an agent.
@@ -186,14 +232,17 @@ impl AgentManager {
         }
     }
 
-    /// List all active agent sessions.
-    pub fn list_agents(&self) -> Vec<(SessionId, AgentStatus)> {
+    /// List all active agent sessions with metadata.
+    pub fn list_agents(&self) -> Vec<(SessionId, String, AgentStatus, DateTime<Utc>)> {
         self.agents
             .iter()
             .map(|entry| {
+                let m = entry.value();
                 (
                     entry.key().clone(),
-                    entry.value().client.status.clone(),
+                    m.name.clone(),
+                    m.client.status.clone(),
+                    m.created_at,
                 )
             })
             .collect()
@@ -341,11 +390,12 @@ impl AgentManager {
 
 /// Resolve an agent binary path from a provider name.
 ///
-/// In a real implementation, this would look up provider -> binary mappings
-/// from a configuration file or registry. For now, it uses simple conventions.
-fn resolve_agent_binary(provider: &str) -> String {
+/// Maps well-known provider names to their CLI binary names.
+/// Falls back to using the provider name directly.
+fn resolve_binary(provider: &str) -> String {
     match provider {
         "claude-code" => "claude".to_string(),
+        "gemini-cli" => "gemini".to_string(),
         "aider" => "aider".to_string(),
         "codex" => "codex".to_string(),
         other => other.to_string(),

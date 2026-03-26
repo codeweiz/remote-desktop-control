@@ -20,6 +20,8 @@ use super::types::*;
 
 /// Default timeout for JSON-RPC calls (30 seconds).
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
+/// Timeout for the initialization handshake (5 seconds).
+const INIT_TIMEOUT_SECS: u64 = 5;
 /// Maximum message size (1 MB).
 const MAX_MESSAGE_SIZE: usize = 1_048_576;
 
@@ -32,6 +34,8 @@ pub enum AcpError {
     SpawnFailed(String),
     #[error("initialization failed: {0}")]
     InitFailed(String),
+    #[error("initialization timed out after {0}s — binary may not support ACP protocol")]
+    InitTimeout(u64),
     #[error("timeout waiting for response")]
     Timeout,
     #[error("message too large: {0} bytes")]
@@ -151,6 +155,22 @@ impl AcpClient {
             "spawning agent process"
         );
 
+        // Check that the binary exists on PATH before attempting to spawn.
+        // This gives a clear error instead of a generic "No such file" from the OS.
+        if std::process::Command::new("which")
+            .arg(agent_binary)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| !s.success())
+            .unwrap_or(true)
+        {
+            return Err(AcpError::SpawnFailed(format!(
+                "binary '{}' not found in PATH",
+                agent_binary
+            )));
+        }
+
         let mut child = Command::new(agent_binary)
             .current_dir(&self.cwd)
             .stdin(std::process::Stdio::piped())
@@ -217,10 +237,20 @@ impl AcpClient {
             }
         });
 
-        // Perform initialization handshake
-        self.initialize().await?;
-
-        Ok(())
+        // Perform initialization handshake with a dedicated timeout.
+        // If the binary doesn't speak ACP protocol, this prevents hanging forever.
+        match timeout(Duration::from_secs(INIT_TIMEOUT_SECS), self.initialize()).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(e),
+            Err(_) => {
+                // Timed out — kill the child so it doesn't linger.
+                if let Some(mut child) = self.child.take() {
+                    let _ = child.kill().await;
+                }
+                self.stdin_tx = None;
+                Err(AcpError::InitTimeout(INIT_TIMEOUT_SECS))
+            }
+        }
     }
 
     /// Handle a single line from the agent's stdout.

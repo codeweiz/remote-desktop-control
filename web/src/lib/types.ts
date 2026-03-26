@@ -20,6 +20,8 @@ export interface SessionCreateRequest {
   name?: string
   kind?: SessionKind
   shell?: string
+  provider?: string
+  model?: string
   cols?: number
   rows?: number
   parent_id?: string | null

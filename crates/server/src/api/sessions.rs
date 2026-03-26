@@ -40,6 +40,10 @@ fn default_session_type() -> String {
 #[derive(Serialize)]
 pub struct CreateSessionResponse {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -92,7 +96,7 @@ pub async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
 
     // Agent sessions
     let agents = state.core.agent_manager.list_agents();
-    for (agent_id, agent_status) in agents {
+    for (agent_id, agent_name, agent_status, agent_created_at) in agents {
         let status = match agent_status {
             AgentStatus::Initializing => "initializing",
             AgentStatus::Ready => "ready",
@@ -103,11 +107,11 @@ pub async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
         };
         list.push(SessionInfo {
             id: agent_id,
-            name: String::new(),
+            name: agent_name,
             kind: "agent".to_string(),
             status: status.to_string(),
             parent_id: None,
-            created_at: String::new(),
+            created_at: agent_created_at.to_rfc3339(),
             exit_code: None,
             shell: None,
             cols: 0,
@@ -134,6 +138,8 @@ pub async fn create_session(
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
             let session_id = nanoid::nanoid!(10);
 
+            // Always return the session ID so the frontend can show it.
+            // On failure the agent is registered in crashed state by the manager.
             match state
                 .core
                 .agent_manager
@@ -142,13 +148,19 @@ pub async fn create_session(
             {
                 Ok(()) => (
                     StatusCode::CREATED,
-                    Json(CreateSessionResponse { id: session_id }),
+                    Json(CreateSessionResponse {
+                        id: session_id,
+                        status: Some("initializing".to_string()),
+                        error: None,
+                    }),
                 )
                     .into_response(),
                 Err(e) => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorBody {
-                        error: e.to_string(),
+                    StatusCode::CREATED,
+                    Json(CreateSessionResponse {
+                        id: session_id,
+                        status: Some("crashed".to_string()),
+                        error: Some(e.to_string()),
                     }),
                 )
                     .into_response(),
@@ -168,7 +180,7 @@ pub async fn create_session(
             {
                 Ok(id) => (
                     StatusCode::CREATED,
-                    Json(CreateSessionResponse { id }),
+                    Json(CreateSessionResponse { id, status: None, error: None }),
                 )
                     .into_response(),
                 Err(e) => (
