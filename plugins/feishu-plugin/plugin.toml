@@ -1,0 +1,15 @@
+[plugin]
+id = "feishu-im"
+name = "Feishu IM Plugin"
+version = "0.1.0"
+type = "im"
+executable = "feishu-plugin"
+description = "Feishu (Lark) instant messaging integration for RTB"
+
+[config]
+# Feishu app credentials — override via environment variables:
+#   FEISHU_APP_ID, FEISHU_APP_SECRET
+app_id = ""
+app_secret = ""
+# Optional: restrict to a specific chat ID
+# chat_id = ""

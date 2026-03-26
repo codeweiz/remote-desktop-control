@@ -70,6 +70,11 @@ impl PluginManager {
         }
     }
 
+    /// Returns the plugins directory path.
+    pub fn plugins_dir(&self) -> &Path {
+        &self.plugins_dir
+    }
+
     /// Discover plugins from the plugins directory.
     ///
     /// Scans each subdirectory for a `plugin.toml` manifest file.
@@ -139,6 +144,24 @@ impl PluginManager {
         Ok(())
     }
 
+    /// Start a plugin by its directory ID (directory name under plugins_dir).
+    ///
+    /// This is used by the hot-reload watcher when a new plugin directory appears.
+    pub async fn start_plugin_by_id(&self, plugin_id: &str) -> Result<(), PluginManagerError> {
+        let plugin_dir = self.plugins_dir.join(plugin_id);
+        let manifest_path = plugin_dir.join("plugin.toml");
+
+        if !manifest_path.exists() {
+            return Err(PluginManagerError::DirNotFound(format!(
+                "no plugin.toml found at {}",
+                manifest_path.display()
+            )));
+        }
+
+        let manifest = Self::parse_manifest(&manifest_path).await?;
+        self.start_plugin(manifest).await
+    }
+
     /// Start a single plugin from its manifest.
     pub async fn start_plugin(
         &self,
@@ -148,6 +171,15 @@ impl PluginManager {
         let plugin_name = manifest.plugin.name.clone();
         let plugin_type = manifest.plugin.plugin_type.clone();
         let plugin_dir = self.plugins_dir.join(&plugin_id);
+
+        // Check if already running
+        {
+            let plugins = self.plugins.read().await;
+            if plugins.contains_key(&plugin_id) {
+                info!(plugin_id = %plugin_id, "plugin already running, skipping");
+                return Ok(());
+            }
+        }
 
         let mut process = PluginProcess::new(manifest, plugin_dir, Some(self.timeout_secs));
 
@@ -221,6 +253,37 @@ impl PluginManager {
                 error!(plugin_id = %plugin_id, error = %e, "plugin initialization error");
                 return Err(e.into());
             }
+        }
+
+        // Wire up IM bridge sender if this is an IM plugin
+        if let Some(ref bridge) = im_bridge {
+            // Create a sender closure that calls the plugin's send_message method
+            let plugins_ref = Arc::clone(&self.plugins);
+            let pid = plugin_id.clone();
+            let sender: crate::im::ImPluginSender = Arc::new(move |text: String, channel: Option<String>| {
+                let plugins_ref = Arc::clone(&plugins_ref);
+                let pid = pid.clone();
+                Box::pin(async move {
+                    let plugins = plugins_ref.read().await;
+                    if let Some(managed) = plugins.get(&pid) {
+                        let params = serde_json::json!({
+                            "text": text,
+                            "channel": channel,
+                        });
+                        if let Err(e) = managed.process.call(
+                            crate::types::im_methods::SEND_MESSAGE,
+                            Some(params),
+                        ).await {
+                            warn!(
+                                plugin_id = %pid,
+                                error = %e,
+                                "failed to send message via IM plugin"
+                            );
+                        }
+                    }
+                })
+            });
+            bridge.set_plugin_sender(sender).await;
         }
 
         // Publish PluginLoaded event
@@ -310,9 +373,6 @@ impl PluginManager {
                     "scheduling plugin restart"
                 );
 
-                // In a real implementation, we'd schedule the restart with a delay.
-                // For now, we just update the state. The next health_check call
-                // after the backoff period would actually trigger the restart.
                 let event_bus = Arc::clone(&self.event_bus);
                 let id_clone = id.clone();
                 tokio::spawn(async move {

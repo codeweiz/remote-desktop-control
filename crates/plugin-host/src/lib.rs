@@ -10,3 +10,4 @@ pub mod plugin;
 pub mod protocol;
 pub mod tunnel;
 pub mod types;
+pub mod watcher;
