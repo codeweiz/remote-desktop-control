@@ -1,8 +1,16 @@
 # Terminal + Agent 系统重设计
 
 > 日期：2026-03-26
-> 状态：Draft
+> 状态：Reviewed
 > 参考项目：[VibeAround](../../), [Mitto](../../)
+
+## 前置条件
+
+- **tmux >= 2.6** 必须安装在 PATH 中。服务端启动时检查，不满足则报错退出并给出安装指引。
+- 不支持降级回裸 shell 模式——tmux 是硬依赖。
+- Docker/容器环境需在镜像中安装 tmux。
+- `agent-client-protocol` crate 需要验证 crates.io 上是否存在。如不存在，从 VibeAround 项目 vendor 或 fork。
+- **升级说明**：所有现有会话在升级后失效，需要重新创建。
 
 ## 背景
 
@@ -55,10 +63,12 @@
 
 替换当前裸 shell 方案，参考 VibeAround。
 
+**tmux 命名约定**：`rtb-{session_id}`，避免与用户 tmux 会话冲突。
+
 **会话创建**：
 ```
-新建：bash -c "cd '/workspace' && exec tmux new-session -s '{session_id}'"
-重连：tmux attach -d -t '{session_id}'
+新建：bash -c "cd '/workspace' && exec tmux new-session -s 'rtb-{session_id}'"
+重连：tmux attach -d -t 'rtb-{session_id}'
 ```
 
 **环境变量**（tmux 内部继承）：
@@ -73,6 +83,25 @@ COLORTERM=truecolor
 - 去掉 `coalesce_ms` 配置 → tmux 自己做输出缓冲
 - 去掉 `replay_gap` / `replay_done` 协议 → 不需要了
 - 会话持久化天然支持 → WebSocket 断了 tmux 还在
+
+**会话生命周期**：
+
+| 操作 | 行为 |
+|------|------|
+| 创建 | `tmux new-session -s 'rtb-{id}'` |
+| WebSocket 断开 | tmux 会话保持（detach），等待重连 |
+| WebSocket 重连 | `tmux attach -d -t 'rtb-{id}'`，tmux 重绘屏幕 |
+| 用户删除会话 | `tmux kill-session -t 'rtb-{id}'` + 杀 PTY 子进程 |
+| 服务端关闭 | 遍历所有 `rtb-*` 命名的 tmux 会话并 kill |
+| 服务端启动 | 扫描残留的 `rtb-*` tmux 会话并清理（孤儿回收） |
+
+**启动时孤儿回收**：
+```rust
+fn cleanup_orphan_tmux_sessions() {
+    // tmux list-sessions -F '#{session_name}' | grep '^rtb-'
+    // 对每个匹配的会话执行 tmux kill-session -t '{name}'
+}
+```
 
 **PTY 读取线程**（简化后）：
 ```rust
@@ -97,14 +126,15 @@ loop {
 - 控制消息：Text 帧 JSON，如 `{"type":"exit","code":0}`、`{"type":"status","status":"running"}`
 
 **输入（客户端 → 服务端）**：
-- PTY 输入：`ws.send(data)` 直接发送字符串 Text 帧
-- 如果 Text 帧不是合法 JSON 命令，当作 PTY 输入写入
-- Resize：`{"type":"resize","cols":120,"rows":40}`
+- PTY 输入：`ws.send(encoder.encode(data))` Binary 帧（避免与 JSON 控制消息冲突）
+- 控制命令：Text 帧 JSON，如 `{"type":"resize","cols":120,"rows":40}`
+- 设计理由：Binary/Text 帧类型天然区分输入和控制，不存在歧义（例如用户 echo 一个 JSON 字符串不会被误解析为 resize 命令）
 
 **背压处理**（参考 Mitto）：
 - 服务端发送时如果 buffer 满，等待 100ms
 - 仍然满 → 主动关闭连接
 - 客户端自动重连，tmux attach 恢复所有内容
+- **防重连风暴**：tmux attach 重绘大屏幕可能再次触发背压。解决方案：重连后先发送 `tmux capture-pane -p`（仅可见区域），再切换到 live streaming
 
 **Keepalive + 健康监控**（参考 Mitto）：
 ```
@@ -126,13 +156,22 @@ struct OscColorResponder {
 
 impl OscColorResponder {
     fn intercept(&self, chunk: &[u8]) {
-        // 检测 OSC 10;? 或 OSC 11;? 查询
-        // 直接写回响应，零延迟
+        // 检测 OSC 10;? 或 OSC 11;? 查询序列：
+        //   \x1b]10;?\x1b\\  或  \x1b]10;?\x07  (OSC 10 query, ST 或 BEL 结尾)
+        //   \x1b]11;?\x1b\\  或  \x1b]11;?\x07  (OSC 11 query)
+        // 注意：只拦截查询（带 ?），不拦截 set-color 命令
+        // 注意：OSC 序列可能跨越 read 边界，需用简单状态机缓冲不完整序列
+        // 参考实现：VibeAround src/core/src/pty/runtime.rs:140-187
     }
 }
 ```
 
 效果：Neovim/Helix 等 TUI 程序启动时不需要等 WebSocket 往返。
+
+**注意事项**：
+- 只拦截 query（`?`），不拦截 set-color 命令
+- 跨 read 边界的 OSC 序列需要状态机缓冲
+- 写回响应时需与 PTY stdin writer 同步（共享 Mutex）
 
 ### 1.4 前端 xterm 优化
 
@@ -158,9 +197,11 @@ try {
   try { terminal.loadAddon(new CanvasAddon()) } catch { /* DOM fallback */ }
 }
 
-// 输入：直接发字符串
+// 输入：Binary 帧（与控制消息的 Text 帧区分）
 terminal.onData(data => {
-  if (ws.readyState === WebSocket.OPEN) ws.send(data)
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(new TextEncoder().encode(data))
+  }
 })
 
 // 输出：Binary 帧直接写
@@ -234,7 +275,58 @@ Prompt(session_id, content_blocks) → 发送用户消息
   ← SessionNotification 流式回调
 ```
 
-权限处理默认自动审批第一个选项。
+权限处理：默认自动审批第一个选项。配置 `auto_approve_tools = false` 时，通过 WebSocket 推送审批请求到前端，用户手动确认。
+
+**Agent WebSocket 协议**（`ws/agent.rs`）：
+
+服务端 → 客户端（Text 帧 JSON）：
+```json
+// 文本回复
+{"type":"text","seq":1,"content":"正在分析代码...","streaming":true}
+// 思考过程
+{"type":"thinking","seq":2,"content":"需要先检查 package.json..."}
+// 工具调用
+{"type":"tool_use","seq":3,"id":"tool_1","name":"Bash","input":{"command":"npm test"}}
+// 工具结果
+{"type":"tool_result","seq":4,"id":"tool_1","output":"All tests passed","is_error":false}
+// 进度
+{"type":"progress","seq":5,"message":"Using tool: Bash"}
+// 一轮完成
+{"type":"turn_complete","seq":6,"cost_usd":0.03}
+// 状态变更
+{"type":"status","status":"working"|"idle"|"waiting_approval"|"error"}
+// 错误
+{"type":"error","message":"...","severity":"permanent"|"transient","guidance":"..."}
+```
+
+客户端 → 服务端（Text 帧 JSON）：
+```json
+// 发送消息
+{"type":"message","text":"请帮我重构这个函数"}
+// 审批工具调用
+{"type":"approve","tool_id":"tool_1"}
+// 拒绝工具调用
+{"type":"deny","tool_id":"tool_1","reason":"不要删除这个文件"}
+// 取消当前操作
+{"type":"cancel"}
+```
+
+**DataEvent 扩展**：
+```rust
+pub enum DataEvent {
+    // Terminal 事件（保持不变）
+    PtyOutput { seq: u64, data: Bytes },
+    PtyExited { exit_code: i32 },
+    // Agent 事件（重新设计）
+    AgentText { seq: u64, content: String, streaming: bool },
+    AgentThinking { seq: u64, content: String },
+    AgentToolUse { seq: u64, id: String, name: String, input: Value },
+    AgentToolResult { seq: u64, id: String, output: String, is_error: bool },
+    AgentProgress { seq: u64, message: String },
+    AgentTurnComplete { seq: u64, cost_usd: Option<f64> },
+    AgentError { seq: u64, message: String, severity: ErrorSeverity, guidance: String },
+}
+```
 
 ### 2.2 多 Agent 适配
 
@@ -291,6 +383,16 @@ let agent = create_agent(provider, model, cwd); // 同一个 cwd
 agent.set_companion_terminal(terminal.id);
 ```
 
+**会话关联**：通过 `SessionInfo.parent_id` 字段关联 Agent → Terminal。
+
+**删除级联规则**：
+| 操作 | 效果 |
+|------|------|
+| 删除 Terminal | 同时杀掉其 companion Agent |
+| 删除 Agent | 不影响 Terminal |
+| Agent 崩溃 | Terminal 不受影响，Agent 按重启策略恢复 |
+| Terminal 退出 | Agent 保持运行（仍可在 cwd 工作），但标记为无 companion |
+
 ### 2.4 Task Pool 自动调度
 
 ```
@@ -303,26 +405,41 @@ agent.set_companion_terminal(terminal.id);
       └────────────────────────────────────────┘
 ```
 
-调度逻辑：
+**调度器架构**：
 ```rust
 struct TaskDispatcher {
-    poll_interval: Duration,  // 如 30s
+    task_pool: Arc<TaskPool>,
+    agent_manager: Arc<AgentManager>,
+    poll_interval: Duration,       // 如 30s
+    max_concurrent: usize,         // 同时运行的 agent 进程数上限
 }
-
-// 每次 poll：
-// 1. 找空闲 Agent（status == Idle）
-// 2. 取优先级最高的 Pending 任务
-// 3. 任务内容作为 prompt 发送给 Agent
-// 4. Pending → InProgress
-// 5. Agent 完成后 → NeedsReview
-// 6. 用户审核后 → Completed 或退回
 ```
+
+调度逻辑：
+```
+每次 poll：
+1. 统计当前 InProgress 任务数
+2. 如果 < max_concurrent：
+   a. 取优先级最高的 Pending 任务
+   b. 查找空闲 Agent（status == Idle），或创建新 Agent
+   c. 任务内容作为 prompt 发送给 Agent
+   d. Pending → InProgress
+3. Agent TurnComplete 事件到达时：
+   a. 如果 config.auto_approve == true → InProgress → Completed
+   b. 如果 config.auto_approve == false → InProgress → NeedsReview
+4. 用户审核后 → Completed 或退回 Pending
+```
+
+**注意**：`max_concurrent` 是 N 个独立的 Agent **进程**，不是一个进程的 N 个并发 prompt。每个 ACP Agent 进程一次只处理一个 prompt。
+
+**任务取消**：InProgress 任务可以被取消，触发 Agent 的 `cancel` 操作，任务回到 Pending。
 
 任务生命周期：
 ```
 Pending → InProgress → NeedsReview → Completed
-                ↑            │
-                └── 退回 ────┘
+   ↑           │            │
+   └── 取消 ───┘            │
+   └──────── 退回 ──────────┘
 ```
 
 系统提示注入：
@@ -373,6 +490,8 @@ let aux_session = process.new_session(cwd, AuxPurpose::TitleGen);
 aux_session.prompt("请为以下内容生成一个简短的标题：...");
 ```
 
+**错误处理**：辅助会话失败（rate limit、timeout、进程崩溃）时静默记录日志，功能优雅降级（如标题留空、不生成建议）。辅助会话的错误**不影响**主会话。
+
 ### 2.7 工作区配置 + 热加载
 
 三层配置（参考 Mitto）：
@@ -394,7 +513,18 @@ auto_start = true
 max_concurrent = 2
 ```
 
-热加载：监控配置文件变化，无需重启即可更新。
+**热加载范围**：
+
+| 配置项 | 热加载 | 说明 |
+|--------|--------|------|
+| `agent.auto_approve_tools` | 是 | 立即生效于新的 prompt |
+| `agent.system_prompt` | 是 | 下次 prompt 使用新提示 |
+| `agent.default_provider` | 否 | 需重启，影响进程创建 |
+| `task_pool.auto_start` | 是 | 立即开始/停止调度器 |
+| `task_pool.max_concurrent` | 是 | 下次调度时生效 |
+| `server.host/port` | 否 | 需重启 |
+
+监控机制：使用 `notify` crate 监听文件变化，变更后重新 merge 三层配置。
 
 ### 2.8 UI 重构
 
