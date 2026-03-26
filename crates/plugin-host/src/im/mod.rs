@@ -20,6 +20,9 @@ use crate::types::{im_methods, ImOnMessageParams, ImOnStatusParams, ImConnection
 /// Default throttle interval for batching outgoing messages (5 seconds).
 const DEFAULT_THROTTLE_MS: u64 = 5000;
 
+/// Maximum length for agent tool result text before truncation.
+const AGENT_TOOL_RESULT_MAX_LEN: usize = 1500;
+
 /// Strips ANSI escape sequences from text.
 fn strip_ansi(input: &str) -> String {
     // Match ANSI escape sequences: ESC[ ... final_byte
@@ -475,6 +478,7 @@ impl ImBridge {
                     tokio::select! {
                         event = data_rx.recv() => {
                             match event {
+                                // ── PTY events (unchanged) ──────────────────
                                 Some(DataEvent::PtyOutput { data, .. }) => {
                                     let text = String::from_utf8_lossy(&data);
                                     let clean = strip_ansi(&text);
@@ -494,8 +498,79 @@ impl ImBridge {
                                     }).await;
                                     return;
                                 }
+
+                                // ── Agent events (Phase 2) ──────────────────
+                                // Agent text: send immediately (low frequency)
+                                Some(DataEvent::AgentText { content, .. }) => {
+                                    if !content.is_empty() {
+                                        let _ = outgoing_tx.send(OutgoingMessage {
+                                            text: content,
+                                            channel: Some(channel_id.clone()),
+                                        }).await;
+                                    }
+                                }
+                                // Agent thinking: skip to reduce noise
+                                Some(DataEvent::AgentThinking { .. }) => {
+                                    debug!(session_id = %session_id, "agent thinking event (skipped for IM)");
+                                }
+                                // Agent tool use: send formatted tool name
+                                Some(DataEvent::AgentToolUse { name, .. }) => {
+                                    let text = format!("\u{1f527} Using tool: {name}");
+                                    let _ = outgoing_tx.send(OutgoingMessage {
+                                        text,
+                                        channel: Some(channel_id.clone()),
+                                    }).await;
+                                }
+                                // Agent tool result: send truncated output
+                                Some(DataEvent::AgentToolResult { output, is_error, .. }) => {
+                                    let prefix = if is_error { "Tool error" } else { "Tool result" };
+                                    let truncated = if output.len() > AGENT_TOOL_RESULT_MAX_LEN {
+                                        format!(
+                                            "{}...\n[truncated, {} bytes total]",
+                                            &output[..AGENT_TOOL_RESULT_MAX_LEN],
+                                            output.len()
+                                        )
+                                    } else {
+                                        output
+                                    };
+                                    let text = format!("{prefix}: {truncated}");
+                                    let _ = outgoing_tx.send(OutgoingMessage {
+                                        text,
+                                        channel: Some(channel_id.clone()),
+                                    }).await;
+                                }
+                                // Agent progress: send update
+                                Some(DataEvent::AgentProgress { message, .. }) => {
+                                    let _ = outgoing_tx.send(OutgoingMessage {
+                                        text: format!("[progress] {message}"),
+                                        channel: Some(channel_id.clone()),
+                                    }).await;
+                                }
+                                // Agent turn complete: send completion marker
+                                Some(DataEvent::AgentTurnComplete { cost_usd, .. }) => {
+                                    let cost_info = cost_usd
+                                        .map(|c| format!(" (cost: ${c:.4})"))
+                                        .unwrap_or_default();
+                                    let text = format!("\u{2705} Turn complete{cost_info}");
+                                    let _ = outgoing_tx.send(OutgoingMessage {
+                                        text,
+                                        channel: Some(channel_id.clone()),
+                                    }).await;
+                                }
+                                // Agent error: send with guidance
+                                Some(DataEvent::AgentError { message, guidance, .. }) => {
+                                    let text = if guidance.is_empty() {
+                                        format!("\u{274c} Agent error: {message}")
+                                    } else {
+                                        format!("\u{274c} Agent error: {message}\nGuidance: {guidance}")
+                                    };
+                                    let _ = outgoing_tx.send(OutgoingMessage {
+                                        text,
+                                        channel: Some(channel_id.clone()),
+                                    }).await;
+                                }
+
                                 None => return, // channel closed
-                                _ => {} // ignore other data events
                             }
                         }
                         _ = &mut deadline => {
