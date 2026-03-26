@@ -1,5 +1,5 @@
 use rtb_core::event_bus::EventBus;
-use rtb_core::events::{AgentContent, ControlEvent, DataEvent, SessionType};
+use rtb_core::events::{ControlEvent, DataEvent, SessionType};
 use bytes::Bytes;
 
 #[tokio::test]
@@ -176,12 +176,10 @@ async fn test_multiple_data_subscribers_same_session() {
 
     bus.publish_data(
         "session-m",
-        DataEvent::AgentMessage {
+        DataEvent::AgentText {
             seq: 10,
-            content: AgentContent::Text {
-                text: "hello".into(),
-                streaming: false,
-            },
+            content: "hello".into(),
+            streaming: false,
         },
     )
     .await;
@@ -190,7 +188,7 @@ async fn test_multiple_data_subscribers_same_session() {
     for rx in [&mut rx1, &mut rx2] {
         let event = rx.recv().await.expect("subscriber should receive event");
         match event {
-            DataEvent::AgentMessage { seq, .. } => {
+            DataEvent::AgentText { seq, .. } => {
                 assert_eq!(seq, 10);
             }
             _ => panic!("unexpected event variant"),
