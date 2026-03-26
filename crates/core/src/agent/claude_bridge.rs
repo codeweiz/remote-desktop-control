@@ -68,11 +68,14 @@ async fn run_acp_bridge(
     use acp::Client as _;
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
+    tracing::info!("[claude-bridge] starting");
+
     // Notification channel: event translator -> ACP connection
     let (notif_tx, mut notif_rx) = mpsc::channel::<acp::SessionNotification>(256);
 
     let agent_impl = ClaudeAcpBridge::new(cwd, notif_tx, system_prompt);
 
+    tracing::info!("[claude-bridge] creating AgentSideConnection");
     let (conn, handle_io) = acp::AgentSideConnection::new(
         agent_impl,
         agent_write.compat_write(),
@@ -81,6 +84,7 @@ async fn run_acp_bridge(
             tokio::task::spawn_local(fut);
         },
     );
+    tracing::info!("[claude-bridge] AgentSideConnection created");
 
     // Drain notification channel -> ACP connection
     let conn = Rc::new(conn);
@@ -93,6 +97,7 @@ async fn run_acp_bridge(
         }
     });
 
+    tracing::info!("[claude-bridge] entering IO loop");
     handle_io.await.map_err(|e| format!("ACP IO error: {}", e))
 }
 
@@ -189,7 +194,9 @@ impl acp::Agent for ClaudeAcpBridge {
         &self,
         _args: acp::InitializeRequest,
     ) -> acp::Result<acp::InitializeResponse> {
+        tracing::info!("[claude-bridge] initialize called, spawning ClaudeSdk...");
         self.ensure_sdk().await?;
+        tracing::info!("[claude-bridge] initialize complete, ClaudeSdk ready");
         Ok(acp::InitializeResponse::new(acp::ProtocolVersion::V1))
     }
 
