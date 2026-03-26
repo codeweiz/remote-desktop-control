@@ -2,6 +2,7 @@
   "private": true,
   "scripts": {
     "build": "cd ../../web && npm run build",
-    "dev": "cd ../../web && npm run dev"
+    "dev": "cd ../../web && npm run dev",
+    "tauri": "npx @tauri-apps/cli"
   }
 }

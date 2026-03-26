@@ -16,7 +16,26 @@ function isReady(status: string): boolean {
 }
 
 export function PluginStatusBar({ plugins, tunnel }: PluginStatusBarProps) {
-  if (plugins.length === 0 && !tunnel?.active) return null
+  // Always show — even when no plugins, show a dim indicator
+  if (plugins.length === 0 && !tunnel?.active) {
+    return (
+      <Tooltip title="No plugins active. Configure Feishu or Tunnel in ~/.rtb/config.toml">
+        <Chip
+          size="small"
+          icon={<PluginIcon sx={{ fontSize: 12 }} />}
+          label="No Plugins"
+          sx={{
+            fontSize: 10,
+            height: 22,
+            bgcolor: 'rgba(255,255,255,0.04)',
+            color: 'text.disabled',
+            '& .MuiChip-icon': { ml: 0.5 },
+            '& .MuiChip-label': { px: 0.5 },
+          }}
+        />
+      </Tooltip>
+    )
+  }
 
   const feishuPlugin = plugins.find(
     (p) => p.id.includes('feishu') || p.name.toLowerCase().includes('feishu'),
