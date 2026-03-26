@@ -7,4 +7,5 @@ pub mod acp_client;
 pub mod claude_sdk;
 pub mod event;
 pub mod manager;
+pub mod native_acp;
 pub mod types;
