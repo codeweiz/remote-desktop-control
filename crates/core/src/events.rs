@@ -26,14 +26,6 @@ pub enum ErrorClass {
     Permanent,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AgentContent {
-    Text { text: String, streaming: bool },
-    Thinking { text: String },
-    ToolUse { id: String, tool: String, input: serde_json::Value },
-    ToolResult { id: String, output: String, is_error: bool },
-}
-
 /// Control events distributed via broadcast channel to all subscribers.
 /// Used for low-frequency system-wide notifications.
 #[derive(Debug, Clone)]
@@ -59,8 +51,15 @@ pub enum ControlEvent {
 /// Used for high-volume session-specific data.
 #[derive(Debug, Clone)]
 pub enum DataEvent {
+    // Terminal (unchanged)
     PtyOutput { seq: u64, data: Bytes },
     PtyExited { exit_code: i32 },
-    AgentMessage { seq: u64, content: AgentContent },
-    AgentToolUse { seq: u64, tool: String, input: serde_json::Value },
+    // Agent events (expanded for Phase 2)
+    AgentText { seq: u64, content: String, streaming: bool },
+    AgentThinking { seq: u64, content: String },
+    AgentToolUse { seq: u64, id: String, name: String, input: serde_json::Value },
+    AgentToolResult { seq: u64, id: String, output: String, is_error: bool },
+    AgentProgress { seq: u64, message: String },
+    AgentTurnComplete { seq: u64, cost_usd: Option<f64> },
+    AgentError { seq: u64, message: String, severity: ErrorClass, guidance: String },
 }

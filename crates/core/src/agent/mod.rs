@@ -4,5 +4,6 @@
 //! JSON-RPC over stdin/stdout, agent lifecycle management, and session routing.
 
 pub mod acp_client;
+pub mod event;
 pub mod manager;
 pub mod types;
