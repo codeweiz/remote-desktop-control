@@ -26,3 +26,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
+plugins/feishu-plugin/target/
+plugins/feishu-plugin/Cargo.lock
+design-system/
