@@ -11,8 +11,6 @@ import {
   IconButton,
   Paper,
   Chip,
-  Divider,
-  SwipeableDrawer,
   Button,
 } from '@mui/material'
 import {
@@ -30,7 +28,6 @@ import type { SessionTree } from '../hooks/useSessions'
 import { TerminalView } from './TerminalView'
 import { AgentDrawer } from './AgentDrawer'
 import { QRCodeModal } from './QRCodeModal'
-import { StatusChip } from './StatusChip'
 import MobileInputBar from './MobileInputBar'
 
 type MobileTab = 'sessions' | 'terminal' | 'agent' | 'more'
@@ -300,7 +297,7 @@ export function MobileView({
 
         {/* Agent tab */}
         {activeTab === 'agent' && (
-          <Box sx={{ height: '100%' }}>
+          <Box sx={{ height: '100%', position: 'relative' }}>
             {activeSession?.kind === 'agent' ? (
               <AgentDrawer
                 open={true}
