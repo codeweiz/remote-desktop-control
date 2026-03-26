@@ -595,7 +595,7 @@ export function AgentDrawer({ open, session, width, onClose }: AgentDrawerProps)
   }, [])
 
   const { send, connectionState } = useWebSocket({
-    path: session ? `/ws/agent/${session.id}` : '',
+    path: session ? `/ws/agent?session=${session.id}` : '',
     enabled: !!session && session.kind === 'agent',
     onMessage: handleAgentMessage,
   })
