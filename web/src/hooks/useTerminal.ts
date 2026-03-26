@@ -17,6 +17,7 @@ interface UseTerminalReturn {
   containerRef: React.RefObject<HTMLDivElement | null>
   connectionState: ConnectionState
   fitTerminal: () => void
+  sendData: (data: string) => void
   searchVisible: boolean
   setSearchVisible: (visible: boolean) => void
   findNext: (term: string) => void
@@ -51,6 +52,13 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
   const findPrevious = useCallback((term: string) => {
     if (searchAddonRef.current && term) {
       searchAddonRef.current.findPrevious(term)
+    }
+  }, [])
+
+  /** Send raw data to the PTY via WebSocket (used by MobileInputBar). */
+  const sendData = useCallback((data: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(new TextEncoder().encode(data))
     }
   }, [])
 
@@ -238,5 +246,5 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
     }
   }, [sessionId, fontSize])
 
-  return { containerRef, connectionState, fitTerminal, searchVisible, setSearchVisible, findNext, findPrevious }
+  return { containerRef, connectionState, fitTerminal, sendData, searchVisible, setSearchVisible, findNext, findPrevious }
 }

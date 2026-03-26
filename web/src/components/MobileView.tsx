@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import {
   Box,
   BottomNavigation,
@@ -31,6 +31,7 @@ import { TerminalView } from './TerminalView'
 import { AgentDrawer } from './AgentDrawer'
 import { QRCodeModal } from './QRCodeModal'
 import { StatusChip } from './StatusChip'
+import MobileInputBar from './MobileInputBar'
 
 type MobileTab = 'sessions' | 'terminal' | 'agent' | 'more'
 
@@ -56,6 +57,17 @@ export function MobileView({
     const stored = localStorage.getItem('rtb_font_size')
     return stored ? parseInt(stored, 10) : 14
   })
+
+  // Ref to hold the terminal's sendData function for MobileInputBar
+  const sendDataRef = useRef<((data: string) => void) | null>(null)
+
+  const handleSendReady = useCallback((send: (data: string) => void) => {
+    sendDataRef.current = send
+  }, [])
+
+  const handleMobileInput = useCallback((data: string) => {
+    sendDataRef.current?.(data)
+  }, [])
 
   const handleSelectSession = useCallback((session: Session) => {
     setActiveSession(session)
@@ -239,9 +251,18 @@ export function MobileView({
 
         {/* Terminal tab */}
         {activeTab === 'terminal' && (
-          <Box sx={{ height: '100%' }}>
+          <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             {activeSession?.kind === 'terminal' ? (
-              <TerminalView sessionId={activeSession.id} fontSize={fontSize} />
+              <>
+                <Box sx={{ flex: 1, minHeight: 0 }}>
+                  <TerminalView
+                    sessionId={activeSession.id}
+                    fontSize={fontSize}
+                    onSendReady={handleSendReady}
+                  />
+                </Box>
+                <MobileInputBar onSend={handleMobileInput} />
+              </>
             ) : (
               <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Box sx={{ textAlign: 'center' }}>
