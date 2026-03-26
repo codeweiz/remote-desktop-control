@@ -6,7 +6,6 @@ import {
   ToggleButton,
   Tooltip,
   Typography,
-  Chip,
 } from '@mui/material'
 import {
   ArrowBack as ArrowBackIcon,
@@ -41,7 +40,24 @@ export function FocusView({
   })
 
   const activeAgentSession = activeSession?.kind === 'agent' ? activeSession : null
-  const drawerWidth = 360
+
+  // Check if active session has a companion agent (linked via parent_id)
+  const companionAgent = activeSession
+    ? sessions.find(
+        s => s.kind === 'agent' && s.parent_id === activeSession.id,
+      ) ?? null
+    : null
+
+  // Show agent toggle only when the session is an agent or has a companion agent
+  const hasAgentCapability = !!activeAgentSession || !!companionAgent
+
+  // Resolve which agent session to pass to the drawer
+  const resolvedAgentSession = activeAgentSession ?? companionAgent
+
+  // Only actually show the drawer when open AND there is a valid agent session
+  const showDrawer = agentDrawerOpen && !!resolvedAgentSession
+
+  const drawerWidth = 400
 
   return (
     <Box sx={{ display: 'flex', height: '100%', position: 'relative' }}>
@@ -52,8 +68,7 @@ export function FocusView({
           display: 'flex',
           flexDirection: 'column',
           minWidth: 0,
-          transition: 'margin-right 0.3s',
-          mr: agentDrawerOpen ? `${drawerWidth}px` : 0,
+          transition: 'flex-basis 0.3s',
         }}
       >
         {/* Header bar with back button and session tabs */}
@@ -130,18 +145,20 @@ export function FocusView({
             </ToggleButtonGroup>
           </Box>
 
-          {/* Agent toggle */}
-          <Tooltip title={agentDrawerOpen ? 'Hide Agent Panel' : 'Show Agent Panel'}>
-            <IconButton
-              size="small"
-              onClick={onToggleAgent}
-              sx={{
-                color: agentDrawerOpen ? 'secondary.main' : 'text.secondary',
-              }}
-            >
-              <BotIcon sx={{ fontSize: 18 }} />
-            </IconButton>
-          </Tooltip>
+          {/* Agent toggle — only visible when session has agent capability */}
+          {hasAgentCapability && (
+            <Tooltip title={agentDrawerOpen ? 'Hide Agent Panel' : 'Show Agent Panel'}>
+              <IconButton
+                size="small"
+                onClick={onToggleAgent}
+                sx={{
+                  color: agentDrawerOpen ? 'secondary.main' : 'text.secondary',
+                }}
+              >
+                <BotIcon sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Tooltip>
+          )}
         </Box>
 
         {/* Terminal area */}
@@ -188,13 +205,15 @@ export function FocusView({
         )}
       </Box>
 
-      {/* Agent Drawer */}
-      <AgentDrawer
-        open={agentDrawerOpen}
-        session={activeAgentSession}
-        width={drawerWidth}
-        onClose={onToggleAgent}
-      />
+      {/* Agent Drawer — only rendered when there is a valid agent session */}
+      {showDrawer && (
+        <AgentDrawer
+          open
+          session={resolvedAgentSession}
+          width={drawerWidth}
+          onClose={onToggleAgent}
+        />
+      )}
     </Box>
   )
 }
