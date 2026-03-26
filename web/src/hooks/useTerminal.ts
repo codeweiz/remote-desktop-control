@@ -16,14 +16,20 @@ interface UseTerminalReturn {
   containerRef: React.RefObject<HTMLDivElement | null>
   connectionState: ConnectionState
   fitTerminal: () => void
+  searchVisible: boolean
+  setSearchVisible: (visible: boolean) => void
+  findNext: (term: string) => void
+  findPrevious: (term: string) => void
 }
 
 export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): UseTerminalReturn {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const searchAddonRef = useRef<SearchAddon | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
+  const [searchVisible, setSearchVisible] = useState(false)
 
   const fitTerminal = useCallback(() => {
     if (fitAddonRef.current) {
@@ -33,6 +39,30 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
         // Ignore fit errors (element might not be visible)
       }
     }
+  }, [])
+
+  const findNext = useCallback((term: string) => {
+    if (searchAddonRef.current && term) {
+      searchAddonRef.current.findNext(term)
+    }
+  }, [])
+
+  const findPrevious = useCallback((term: string) => {
+    if (searchAddonRef.current && term) {
+      searchAddonRef.current.findPrevious(term)
+    }
+  }, [])
+
+  // Ctrl+Shift+F keyboard shortcut for search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'f') {
+        e.preventDefault()
+        setSearchVisible(prev => !prev)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
   }, [])
 
   useEffect(() => {
@@ -83,6 +113,7 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
 
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
+    searchAddonRef.current = searchAddon
 
     // Open terminal in DOM
     terminal.open(container)
@@ -188,9 +219,11 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
       terminal.dispose()
       terminalRef.current = null
       fitAddonRef.current = null
+      searchAddonRef.current = null
       setConnectionState('disconnected')
+      setSearchVisible(false)
     }
   }, [sessionId, fontSize])
 
-  return { containerRef, connectionState, fitTerminal }
+  return { containerRef, connectionState, fitTerminal, searchVisible, setSearchVisible, findNext, findPrevious }
 }

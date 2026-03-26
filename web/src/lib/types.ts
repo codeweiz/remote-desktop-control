@@ -70,3 +70,36 @@ export interface AgentMessage {
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error'
 
 export type Theme = 'dark' | 'light'
+
+/** Task Pool types */
+export type TaskPriority = 'P0' | 'P1' | 'P2' | 'P3'
+
+export type TaskStatus = 'Pending' | 'InProgress' | 'NeedsReview' | 'Completed' | 'Cancelled'
+
+export interface Task {
+  id: string
+  title: string
+  description?: string
+  priority: TaskPriority
+  status: TaskStatus
+  session_id?: string | null
+  created_at: string
+  updated_at?: string
+}
+
+export interface TaskCreateRequest {
+  title: string
+  description?: string
+  priority?: TaskPriority
+}
+
+/** Notification types */
+export interface NotificationEvent {
+  type: 'notification'
+  id: string
+  trigger: 'agent' | 'task' | 'session' | 'system'
+  summary: string
+  session_id?: string
+  session_name?: string
+  timestamp: string
+}

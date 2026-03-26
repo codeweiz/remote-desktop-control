@@ -53,8 +53,6 @@ fn edit_config() -> Result<()> {
                 "vim".to_string()
             } else if which_exists("nano") {
                 "nano".to_string()
-            } else if which_exists("vi") {
-                "vi".to_string()
             } else {
                 "vi".to_string()
             }

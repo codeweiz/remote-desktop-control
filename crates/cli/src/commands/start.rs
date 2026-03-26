@@ -40,7 +40,7 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
     //    flags are merged so that `rtb --port 8080` and `rtb start --port 8080`
     //    behave identically.
     let (cmd_port, cmd_host) = match &cli.command {
-        Some(crate::Commands::Start { port, host }) => (port.clone(), host.clone()),
+        Some(crate::Commands::Start { port, host }) => (*port, host.clone()),
         _ => (None, None),
     };
 

@@ -564,25 +564,25 @@ pub fn fuse_signals(signals: &[DetectionSignal]) -> Vec<NotifyTrigger> {
         match &signal.trigger {
             NotifyTrigger::WaitingForInput { .. } => {
                 prompt_score += weighted;
-                if best_prompt.map_or(true, |b| signal.confidence > b.confidence) {
+                if best_prompt.is_none_or(|b| signal.confidence > b.confidence) {
                     best_prompt = Some(signal);
                 }
             }
             NotifyTrigger::ProcessExited { .. } => {
                 exit_score += weighted;
-                if best_exit.map_or(true, |b| signal.confidence > b.confidence) {
+                if best_exit.is_none_or(|b| signal.confidence > b.confidence) {
                     best_exit = Some(signal);
                 }
             }
             NotifyTrigger::LongRunningDone { .. } => {
                 long_running_score += weighted;
-                if best_long_running.map_or(true, |b| signal.confidence > b.confidence) {
+                if best_long_running.is_none_or(|b| signal.confidence > b.confidence) {
                     best_long_running = Some(signal);
                 }
             }
             NotifyTrigger::ErrorDetected { .. } => {
                 error_score += weighted;
-                if best_error.map_or(true, |b| signal.confidence > b.confidence) {
+                if best_error.is_none_or(|b| signal.confidence > b.confidence) {
                     best_error = Some(signal);
                 }
             }

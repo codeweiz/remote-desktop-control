@@ -1,4 +1,4 @@
-import type { Session, SessionKind, SessionCreateRequest, ServerStatus } from './types'
+import type { Session, SessionKind, SessionCreateRequest, ServerStatus, Task, TaskCreateRequest } from './types'
 
 /** Extract and store auth token from URL or localStorage */
 function initToken(): string | null {
@@ -98,4 +98,33 @@ export async function deleteSession(id: string): Promise<void> {
 /** Get server status */
 export async function getStatus(): Promise<ServerStatus> {
   return apiFetch<ServerStatus>('/api/v1/status')
+}
+
+/** List all tasks */
+export async function getTasks(): Promise<Task[]> {
+  return apiFetch<Task[]>('/api/v1/tasks')
+}
+
+/** Create a new task */
+export async function createTask(req: TaskCreateRequest): Promise<Task> {
+  return apiFetch<Task>('/api/v1/tasks', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+/** Update a task (approve, cancel, etc.) */
+export async function updateTask(id: string, update: Partial<Task>): Promise<Task> {
+  return apiFetch<Task>(`/api/v1/tasks/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(update),
+  })
+}
+
+/** Rename a session */
+export async function renameSession(id: string, name: string): Promise<Session> {
+  return apiFetch<Session>(`/api/v1/sessions/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
 }

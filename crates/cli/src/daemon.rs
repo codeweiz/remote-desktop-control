@@ -291,9 +291,9 @@ pub fn expand_token_path(config: &Config) -> String {
 
 /// Expand a leading `~` to the current user's home directory.
 fn expand_tilde(s: &str) -> String {
-    if s.starts_with('~') {
+    if let Some(rest) = s.strip_prefix('~') {
         if let Some(home) = dirs::home_dir() {
-            return home.to_string_lossy().to_string() + &s[1..];
+            return home.to_string_lossy().to_string() + rest;
         }
     }
     s.to_string()

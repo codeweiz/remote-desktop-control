@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Session } from './lib/types'
+import { renameSession } from './lib/api'
 import { useTheme } from './hooks/useTheme'
 import { useSessions } from './hooks/useSessions'
 import { useWebSocket } from './hooks/useWebSocket'
@@ -10,6 +11,9 @@ import { TerminalView } from './components/TerminalView'
 import { AgentChat } from './components/AgentChat'
 import { CommandPalette } from './components/CommandPalette'
 import { SettingsPanel } from './components/SettingsPanel'
+import { NotificationToast } from './components/NotificationToast'
+import { MobileNav } from './components/MobileNav'
+import type { MobileTab } from './components/MobileNav'
 
 export default function App() {
   const { theme, toggleTheme } = useTheme()
@@ -30,6 +34,28 @@ export default function App() {
     const stored = localStorage.getItem('rtb_font_size')
     return stored ? parseInt(stored, 10) : 14
   })
+
+  // Mobile state
+  const [sidebarVisible, setSidebarVisible] = useState(true)
+  const [mobileTab, setMobileTab] = useState<MobileTab>('terminal')
+  const [isMobile, setIsMobile] = useState(false)
+
+  // Detect mobile
+  useEffect(() => {
+    const checkMobile = () => {
+      const mobile = window.innerWidth < 768
+      setIsMobile(mobile)
+      if (mobile) {
+        setSidebarVisible(false)
+        setAgentPanelVisible(false)
+      } else {
+        setSidebarVisible(true)
+      }
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Active agent session for the chat panel
   const activeAgentSession = activeSession?.kind === 'agent' ? activeSession : null
@@ -72,7 +98,12 @@ export default function App() {
     if (session.kind === 'agent') {
       setAgentPanelVisible(true)
     }
-  }, [])
+    // On mobile, switch to appropriate tab and close sidebar
+    if (isMobile) {
+      setSidebarVisible(false)
+      setMobileTab(session.kind === 'agent' ? 'chat' : 'terminal')
+    }
+  }, [isMobile])
 
   // Close a tab
   const handleCloseTab = useCallback((sessionId: string) => {
@@ -116,6 +147,45 @@ export default function App() {
     }
   }, [removeSession, handleCloseTab])
 
+  // Rename session
+  const handleRenameSession = useCallback(async (id: string, name: string) => {
+    try {
+      await renameSession(id, name)
+    } catch {
+      // Ignore rename errors silently
+    }
+  }, [])
+
+  // Navigate to session from notification toast
+  const handleNavigateToSession = useCallback((sessionId: string) => {
+    const allSessions = [...tree.terminals, ...tree.agents]
+    const session = allSessions.find(s => s.id === sessionId)
+    if (session) {
+      handleSelectSession(session)
+    }
+  }, [tree, handleSelectSession])
+
+  // Handle mobile tab changes
+  const handleMobileTabChange = useCallback((tab: MobileTab) => {
+    setMobileTab(tab)
+    if (tab === 'sessions') {
+      setSidebarVisible(true)
+    } else {
+      setSidebarVisible(false)
+    }
+    if (tab === 'settings') {
+      setSettingsOpen(true)
+    }
+    if (tab === 'chat') {
+      setAgentPanelVisible(true)
+    }
+  }, [])
+
+  // Determine visibility based on mobile tab
+  const showSidebar = isMobile ? sidebarVisible : true
+  const showTerminal = isMobile ? mobileTab === 'terminal' : true
+  const showChat = isMobile ? mobileTab === 'chat' : agentPanelVisible
+
   return (
     <div className="h-full w-full flex flex-col bg-bg-primary">
       {/* Top bar */}
@@ -125,6 +195,7 @@ export default function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onOpenSettings={() => setSettingsOpen(true)}
+        onToggleSidebar={() => setSidebarVisible(prev => !prev)}
       />
 
       {/* Main content: three-column layout */}
@@ -137,31 +208,61 @@ export default function App() {
           onCreateTerminal={handleCreateTerminal}
           onCreateAgent={handleCreateAgent}
           onDeleteSession={handleDeleteSession}
+          onRenameSession={handleRenameSession}
+          sidebarVisible={showSidebar}
         />
+
+        {/* Mobile overlay backdrop when sidebar is open */}
+        {isMobile && sidebarVisible && (
+          <div
+            className="fixed inset-0 z-30 bg-black/40"
+            onClick={() => setSidebarVisible(false)}
+          />
+        )}
 
         {/* Terminal (center) */}
-        <TerminalView
-          activeSession={activeSession}
-          openTabs={openTabs.map(s => ({ session: s }))}
-          fontSize={fontSize}
-          onSelectTab={handleSelectSession}
-          onCloseTab={handleCloseTab}
-        />
+        {showTerminal && (
+          <TerminalView
+            activeSession={activeSession}
+            openTabs={openTabs.map(s => ({ session: s }))}
+            fontSize={fontSize}
+            onSelectTab={handleSelectSession}
+            onCloseTab={handleCloseTab}
+          />
+        )}
 
-        {/* Agent chat (right) */}
-        <AgentChat
-          session={activeAgentSession}
-          isVisible={agentPanelVisible}
-          onToggle={() => setAgentPanelVisible(prev => !prev)}
-        />
+        {/* Agent chat (right) - hidden on mobile unless explicitly shown */}
+        {showChat && (
+          <AgentChat
+            session={activeAgentSession}
+            isVisible={true}
+            onToggle={() => {
+              setAgentPanelVisible(prev => !prev)
+              if (isMobile) setMobileTab('terminal')
+            }}
+          />
+        )}
       </div>
 
-      {/* Status bar */}
-      <StatusBar
-        sessionCount={tree.terminals.length}
-        agentCount={tree.agents.length}
-        tunnelUrl={null}
-      />
+      {/* Status bar - hidden on mobile */}
+      {!isMobile && (
+        <StatusBar
+          sessionCount={tree.terminals.length}
+          agentCount={tree.agents.length}
+          tunnelUrl={null}
+        />
+      )}
+
+      {/* Mobile bottom navigation */}
+      {isMobile && (
+        <MobileNav
+          activeTab={mobileTab}
+          onTabChange={handleMobileTabChange}
+        />
+      )}
+
+      {/* Notification toasts */}
+      <NotificationToast onNavigateToSession={handleNavigateToSession} />
 
       {/* Overlays */}
       <CommandPalette

@@ -1,6 +1,7 @@
 import { useTerminal } from '../hooks/useTerminal'
 import { X, Circle } from 'lucide-react'
 import type { Session } from '../lib/types'
+import { SearchBar } from './SearchBar'
 
 interface TerminalTab {
   session: Session
@@ -63,7 +64,7 @@ export function TerminalView({
   onSelectTab,
   onCloseTab,
 }: TerminalViewProps) {
-  const { containerRef, connectionState } = useTerminal({
+  const { containerRef, connectionState, searchVisible, setSearchVisible, findNext, findPrevious } = useTerminal({
     sessionId: activeSession?.kind === 'terminal' ? activeSession.id : null,
     fontSize,
   })
@@ -100,7 +101,15 @@ export function TerminalView({
 
       {/* Terminal area */}
       {activeSession?.kind === 'terminal' ? (
-        <div ref={containerRef} className="flex-1 xterm-container" />
+        <div className="flex-1 relative">
+          <SearchBar
+            isVisible={searchVisible}
+            onClose={() => setSearchVisible(false)}
+            onFindNext={findNext}
+            onFindPrevious={findPrevious}
+          />
+          <div ref={containerRef} className="absolute inset-0 xterm-container" />
+        </div>
       ) : (
         <div className="flex-1 flex items-center justify-center text-text-secondary">
           <div className="text-center">

@@ -7,20 +7,15 @@ use serde::{Deserialize, Serialize};
 pub type TaskId = String;
 
 /// Task priority levels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Priority {
     /// Highest priority — execute immediately when possible.
     P0 = 0,
     /// Normal priority.
+    #[default]
     P1 = 1,
     /// Low priority — background tasks.
     P2 = 2,
-}
-
-impl Default for Priority {
-    fn default() -> Self {
-        Priority::P1
-    }
 }
 
 impl std::fmt::Display for Priority {
@@ -66,10 +61,11 @@ impl Default for TaskTarget {
 }
 
 /// Task execution status.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     /// Waiting in the queue.
+    #[default]
     Queued,
     /// Blocked by unfinished dependencies.
     Blocked,
@@ -85,11 +81,7 @@ pub enum TaskStatus {
     Cancelled,
 }
 
-impl Default for TaskStatus {
-    fn default() -> Self {
-        TaskStatus::Queued
-    }
-}
+// TaskStatus uses #[derive(Default)] with #[default] on Queued variant.
 
 impl std::fmt::Display for TaskStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

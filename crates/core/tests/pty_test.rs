@@ -148,49 +148,50 @@ async fn test_pty_output() {
     // Subscribe to data events for this session
     let mut rx = event_bus.create_data_subscriber(&session_id);
 
-    // Give the shell a moment to start up
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Give the shell a moment to start up, then send the echo command.
+    // Retry the write a few times because the shell may need extra time
+    // in resource-constrained environments (CI, heavy load, etc.).
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
-    // Send a command
-    manager
-        .write_input(&session_id, b"echo hello\n")
-        .expect("should write input");
-
-    // Wait for output containing "hello" with a timeout
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-    let mut found_hello = false;
-
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            break;
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
+        manager
+            .write_input(&session_id, b"echo hello\n")
+            .expect("should write input");
 
-        match tokio::time::timeout(remaining, rx.recv()).await {
-            Ok(Some(rtb_core::events::DataEvent::PtyOutput { data, .. })) => {
-                let text = String::from_utf8_lossy(&data);
-                if text.contains("hello") {
-                    found_hello = true;
-                    break;
+        // Drain any events for a short window to see if "hello" appears
+        let check_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let remaining = check_deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match tokio::time::timeout(remaining, rx.recv()).await {
+                Ok(Some(rtb_core::events::DataEvent::PtyOutput { data, .. })) => {
+                    let text = String::from_utf8_lossy(&data);
+                    if text.contains("hello") {
+                        // Success — verify ring buffer also captured output
+                        let session = manager.get_session(&session_id).unwrap();
+                        let buffer_items = session.buffer().get_last_n(100);
+                        assert!(!buffer_items.is_empty(), "ring buffer should have captured output");
+
+                        // Cleanup
+                        manager.kill_session(&session_id).await.expect("should kill session");
+                        return; // PASS
+                    }
                 }
+                Ok(Some(_)) => { /* other event type */ }
+                Ok(None) => break, // channel closed
+                Err(_) => break,   // timeout
             }
-            Ok(Some(_)) => {
-                // Other event types, continue
-            }
-            Ok(None) => break,  // channel closed
-            Err(_) => break,    // timeout
         }
     }
 
-    assert!(found_hello, "should have received output containing 'hello'");
-
-    // Also verify the ring buffer captured output
-    let session = manager.get_session(&session_id).unwrap();
-    let buffer_items = session.buffer().get_last_n(100);
-    assert!(!buffer_items.is_empty(), "ring buffer should have captured output");
-
-    // Cleanup
-    manager.kill_session(&session_id).await.expect("should kill session");
+    // Cleanup before failing
+    let _ = manager.kill_session(&session_id).await;
+    panic!("should have received output containing 'hello' after 3 attempts");
 }
 
 #[tokio::test]

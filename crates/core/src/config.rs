@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Application configuration, loaded from `~/.rtb/config.toml`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub server: ServerConfig,
@@ -88,7 +88,7 @@ pub struct LoggingConfig {
     pub max_files: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TunnelConfig {
     pub provider: String,
@@ -108,21 +108,7 @@ pub struct PluginsConfig {
 // Default implementations
 // ---------------------------------------------------------------------------
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
-            security: SecurityConfig::default(),
-            session: SessionConfig::default(),
-            agent: AgentConfig::default(),
-            notification: NotificationConfig::default(),
-            task_pool: TaskPoolConfig::default(),
-            logging: LoggingConfig::default(),
-            tunnel: TunnelConfig::default(),
-            plugins: PluginsConfig::default(),
-        }
-    }
-}
+// Config uses #[derive(Default)] on the struct definition.
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -201,14 +187,7 @@ impl Default for LoggingConfig {
     }
 }
 
-impl Default for TunnelConfig {
-    fn default() -> Self {
-        Self {
-            provider: String::new(),
-            domain: String::new(),
-        }
-    }
-}
+// TunnelConfig uses #[derive(Default)] on the struct definition.
 
 impl Default for PluginsConfig {
     fn default() -> Self {
@@ -577,9 +556,9 @@ impl Config {
 
 /// Replace a leading `~` with the user's home directory.
 fn expand_tilde_in_str(s: &str) -> String {
-    if s.starts_with('~') {
+    if let Some(rest) = s.strip_prefix('~') {
         if let Some(home) = dirs::home_dir() {
-            return home.to_string_lossy().to_string() + &s[1..];
+            return home.to_string_lossy().to_string() + rest;
         }
     }
     s.to_string()

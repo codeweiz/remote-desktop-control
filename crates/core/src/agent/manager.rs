@@ -39,6 +39,7 @@ impl Default for RestartPolicy {
 /// Tracks state for a managed agent session.
 struct ManagedAgent {
     client: AcpClient,
+    #[allow(dead_code)]
     agent_binary: String,
     restart_count: u32,
     restart_policy: RestartPolicy,

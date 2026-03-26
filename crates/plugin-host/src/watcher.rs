@@ -78,11 +78,11 @@ impl PluginWatcher {
             if let Ok(entries) = std::fs::read_dir(&plugins_dir_for_bridge) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_dir() {
-                        if path.join("plugin.toml").exists() {
-                            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                                known_plugins.insert(name.to_string());
-                            }
+                    if path.is_dir()
+                        && path.join("plugin.toml").exists()
+                    {
+                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                            known_plugins.insert(name.to_string());
                         }
                     }
                 }
