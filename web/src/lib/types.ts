@@ -101,6 +101,21 @@ export interface TaskCreateRequest {
   priority?: TaskPriority
 }
 
+/** Plugin types */
+export interface PluginInfo {
+  id: string
+  name: string
+  type: string
+  status: string
+}
+
+export interface TunnelStatus {
+  active: boolean
+  provider?: string
+  url?: string
+  message: string
+}
+
 /** Notification types */
 export interface NotificationEvent {
   type: 'notification'

@@ -8,6 +8,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { NotificationToast } from './components/NotificationToast'
 import { useSessions } from './hooks/useSessions'
 import { useWebSocket } from './hooks/useWebSocket'
+import { usePlugins } from './hooks/usePlugins'
 import type { Session } from './lib/types'
 
 type ViewMode = 'grid' | 'focus'
@@ -25,6 +26,9 @@ export default function App() {
   const [activeSession, setActiveSession] = useState<Session | null>(null)
   const [agentDrawerOpen, setAgentDrawerOpen] = useState(false)
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false)
+
+  // Plugin status (polls every 15s)
+  const { plugins, tunnel } = usePlugins()
 
   // Status WS for latency measurement
   const { latency } = useWebSocket({
@@ -127,6 +131,8 @@ export default function App() {
         viewMode={viewMode}
         connectionState={statusConnection}
         latency={latency}
+        plugins={plugins}
+        tunnel={tunnel}
         onToggleView={() => setViewMode(v => v === 'grid' ? 'focus' : 'grid')}
         onOpenCommandPalette={() => setCmdPaletteOpen(true)}
       />
@@ -135,6 +141,8 @@ export default function App() {
           <GridView
             sessions={[...tree.terminals, ...tree.agents]}
             tree={tree}
+            plugins={plugins}
+            tunnel={tunnel}
             onFocusSession={handleFocusSession}
             onCreateSession={addSession}
             onDeleteSession={handleDeleteSession}

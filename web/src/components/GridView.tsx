@@ -15,6 +15,7 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Tooltip,
 } from '@mui/material'
 import {
   Terminal as TerminalIcon,
@@ -23,8 +24,10 @@ import {
   Delete as DeleteIcon,
   PlayArrow as PlayIcon,
   Close as CloseIcon,
+  Extension as PluginIcon,
+  Language as TunnelIcon,
 } from '@mui/icons-material'
-import type { Session, SessionCreateRequest } from '../lib/types'
+import type { Session, SessionCreateRequest, PluginInfo, TunnelStatus } from '../lib/types'
 import type { SessionTree } from '../hooks/useSessions'
 import { TaskPool } from './TaskPool'
 import { StatusChip } from './StatusChip'
@@ -121,9 +124,153 @@ function NewAgentDialog({
   )
 }
 
+function PluginStatusCard({
+  plugins,
+  tunnel,
+}: {
+  plugins: PluginInfo[]
+  tunnel: TunnelStatus | null
+}) {
+  const hasContent = plugins.length > 0 || tunnel
+
+  return (
+    <Paper elevation={2} sx={{ p: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+        <PluginIcon sx={{ fontSize: 16, color: '#a78bfa' }} />
+        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+          Plugins
+        </Typography>
+        <Chip
+          size="small"
+          label={`${plugins.length}`}
+          sx={{
+            fontSize: 10,
+            height: 18,
+            fontFamily: "'JetBrains Mono', monospace",
+            bgcolor: 'rgba(139,92,246,0.15)',
+            color: '#a78bfa',
+            '& .MuiChip-label': { px: 0.5 },
+          }}
+        />
+      </Box>
+
+      {!hasContent ? (
+        <Typography variant="caption" sx={{ color: 'text.secondary', fontStyle: 'italic', fontSize: 11 }}>
+          No plugins loaded
+        </Typography>
+      ) : (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+          {plugins.map((plugin) => {
+            const ready = plugin.status === 'ready' || plugin.status === 'running'
+            const statusColor = ready ? '#34d399' : plugin.status === 'error' ? '#f87171' : '#94a3b8'
+            return (
+              <Box
+                key={plugin.id}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  px: 1,
+                  py: 0.5,
+                  borderRadius: 1,
+                  bgcolor: 'rgba(0,0,0,0.2)',
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                  <Box
+                    sx={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      bgcolor: statusColor,
+                      boxShadow: ready ? `0 0 4px ${statusColor}80` : 'none',
+                    }}
+                  />
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      fontSize: 11,
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {plugin.name}
+                  </Typography>
+                </Box>
+                <Chip
+                  size="small"
+                  label={plugin.status}
+                  sx={{
+                    fontSize: 9,
+                    height: 18,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    bgcolor: `${statusColor}18`,
+                    color: statusColor,
+                    '& .MuiChip-label': { px: 0.5 },
+                  }}
+                />
+              </Box>
+            )
+          })}
+
+          {tunnel && (
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                px: 1,
+                py: 0.5,
+                borderRadius: 1,
+                bgcolor: 'rgba(0,0,0,0.2)',
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                <TunnelIcon sx={{ fontSize: 12, color: tunnel.active ? '#60a5fa' : '#94a3b8' }} />
+                <Typography
+                  variant="caption"
+                  sx={{
+                    fontSize: 11,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontWeight: 500,
+                  }}
+                >
+                  Tunnel
+                </Typography>
+              </Box>
+              <Tooltip title={tunnel.url || tunnel.message}>
+                <Chip
+                  size="small"
+                  label={tunnel.active ? (tunnel.url ? tunnel.url.replace(/^https?:\/\//, '') : 'active') : 'inactive'}
+                  sx={{
+                    fontSize: 9,
+                    height: 18,
+                    maxWidth: 120,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    bgcolor: tunnel.active ? 'rgba(96,165,250,0.15)' : 'rgba(148,163,184,0.15)',
+                    color: tunnel.active ? '#60a5fa' : '#94a3b8',
+                    '& .MuiChip-label': {
+                      px: 0.5,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    },
+                  }}
+                />
+              </Tooltip>
+            </Box>
+          )}
+        </Box>
+      )}
+    </Paper>
+  )
+}
+
 interface GridViewProps {
   sessions: Session[]
   tree: SessionTree
+  plugins: PluginInfo[]
+  tunnel: TunnelStatus | null
   onFocusSession: (session: Session) => void
   onCreateSession: (req: SessionCreateRequest) => Promise<Session>
   onDeleteSession: (id: string) => void
@@ -305,6 +452,8 @@ function NewSessionCard({ kind, onCreate }: { kind: 'terminal' | 'agent'; onCrea
 export function GridView({
   sessions,
   tree,
+  plugins,
+  tunnel,
   onFocusSession,
   onCreateSession,
   onDeleteSession,
@@ -396,6 +545,11 @@ export function GridView({
               />
             </Box>
           </Paper>
+        </Grid>
+
+        {/* Plugin Status card */}
+        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+          <PluginStatusCard plugins={plugins} tunnel={tunnel} />
         </Grid>
       </Grid>
 

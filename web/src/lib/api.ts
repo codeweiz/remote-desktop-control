@@ -1,4 +1,4 @@
-import type { Session, SessionKind, SessionStatus, SessionCreateRequest, ServerStatus, Task, TaskCreateRequest } from './types'
+import type { Session, SessionKind, SessionStatus, SessionCreateRequest, ServerStatus, Task, TaskCreateRequest, PluginInfo, TunnelStatus } from './types'
 
 /** Extract auth token from URL params and persist to localStorage (runs once at load). */
 function initToken(): void {
@@ -139,5 +139,29 @@ export async function renameSession(id: string, name: string): Promise<Session> 
   return apiFetch<Session>(`/api/v1/sessions/${id}`, {
     method: 'PATCH',
     body: JSON.stringify({ name }),
+  })
+}
+
+/** List all plugins */
+export async function getPlugins(): Promise<PluginInfo[]> {
+  return apiFetch<PluginInfo[]>('/api/v1/plugins')
+}
+
+/** Get tunnel status */
+export async function getTunnelStatus(): Promise<TunnelStatus> {
+  return apiFetch<TunnelStatus>('/api/v1/tunnel/status')
+}
+
+/** Enable a plugin */
+export async function enablePlugin(name: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/api/v1/plugins/${name}/enable`, {
+    method: 'POST',
+  })
+}
+
+/** Disable a plugin */
+export async function disablePlugin(name: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/api/v1/plugins/${name}/disable`, {
+    method: 'POST',
   })
 }

@@ -17,13 +17,16 @@ import {
   Hexagon as HexagonIcon,
   WifiOff as WifiOffIcon,
 } from '@mui/icons-material'
-import type { ConnectionState } from '../lib/types'
+import type { ConnectionState, PluginInfo, TunnelStatus } from '../lib/types'
 import { QRCodeModal } from './QRCodeModal'
+import { PluginStatusBar } from './PluginStatusBar'
 
 interface TopBarProps {
   viewMode: 'grid' | 'focus'
   connectionState: ConnectionState
   latency: number | null
+  plugins: PluginInfo[]
+  tunnel: TunnelStatus | null
   onToggleView: () => void
   onOpenCommandPalette: () => void
 }
@@ -32,6 +35,8 @@ export function TopBar({
   viewMode,
   connectionState,
   latency,
+  plugins,
+  tunnel,
   onToggleView,
   onOpenCommandPalette,
 }: TopBarProps) {
@@ -108,6 +113,8 @@ export function TopBar({
             '& .MuiChip-icon': { ml: 0.5 },
           }}
         />
+
+        <PluginStatusBar plugins={plugins} tunnel={tunnel} />
       </Box>
 
       {/* Center: View mode toggle */}
