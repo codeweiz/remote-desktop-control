@@ -1081,15 +1081,8 @@ async fn handle_initialize(
         }
     }
 
-    // Send authenticated status (HTTP auth OK, WebSocket not yet connected)
-    let _ = notification_tx
-        .send(JsonRpcNotification::new(
-            "im/on_status",
-            Some(serde_json::json!({
-                "status": "authenticated",
-            })),
-        ))
-        .await;
+    // Note: WebSocket listener will send "connected" status once WS is established.
+    // No status notification here to avoid confusing the IM bridge.
 
     // Start the WebSocket message listener in background (without holding Mutex)
     let notif_tx = notification_tx.clone();
