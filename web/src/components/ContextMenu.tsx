@@ -59,19 +59,19 @@ export function ContextMenu({ state, onClose }: ContextMenuProps) {
   return (
     <div
       ref={menuRef}
-      className="fixed z-[100] bg-bg-secondary border border-border rounded-lg shadow-2xl py-1 min-w-[160px]"
+      className="fixed z-[100] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-md shadow-xl py-1 min-w-[160px] animate-fade-in"
       style={{ left: adjustedX, top: adjustedY }}
     >
       {state.items.map(item => (
         <button
           key={item.id}
           className={`
-            w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors text-left
+            w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors duration-150 text-left cursor-pointer
             ${item.disabled
-              ? 'text-text-secondary/50 cursor-not-allowed'
+              ? 'text-[var(--text-muted)]/50 cursor-not-allowed'
               : item.danger
-                ? 'text-accent-red hover:bg-accent-red/10'
-                : 'text-text-primary hover:bg-bg-tertiary'
+                ? 'text-[var(--accent-red)] hover:bg-[var(--accent-red)]/10'
+                : 'text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]'
             }
           `}
           onClick={() => {

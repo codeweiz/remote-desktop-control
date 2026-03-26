@@ -13,20 +13,20 @@ import { useTaskPool } from '../hooks/useTaskPool'
 
 function priorityColor(priority: TaskPriority): string {
   switch (priority) {
-    case 'P0': return 'bg-accent-red/20 text-accent-red'
-    case 'P1': return 'bg-accent-orange/20 text-accent-orange'
-    case 'P2': return 'bg-accent-green/20 text-accent-green'
-    case 'P3': return 'bg-accent-blue/20 text-accent-blue'
+    case 'P0': return 'bg-red-500/20 text-red-400'
+    case 'P1': return 'bg-amber-500/20 text-amber-400'
+    case 'P2': return 'bg-green-500/20 text-green-400'
+    case 'P3': return 'bg-blue-500/20 text-blue-400'
   }
 }
 
 function statusColor(status: TaskStatus): string {
   switch (status) {
-    case 'Pending': return 'bg-bg-tertiary text-text-secondary'
-    case 'InProgress': return 'bg-accent-blue/20 text-accent-blue'
-    case 'NeedsReview': return 'bg-accent-orange/20 text-accent-orange'
-    case 'Completed': return 'bg-accent-green/20 text-accent-green'
-    case 'Cancelled': return 'bg-bg-tertiary text-text-secondary line-through'
+    case 'Pending': return 'bg-[var(--bg-elevated)] text-[var(--text-muted)]'
+    case 'InProgress': return 'bg-blue-500/20 text-blue-400'
+    case 'NeedsReview': return 'bg-amber-500/20 text-amber-400'
+    case 'Completed': return 'bg-green-500/20 text-green-400'
+    case 'Cancelled': return 'bg-[var(--bg-elevated)] text-[var(--text-muted)] line-through'
   }
 }
 
@@ -40,23 +40,23 @@ function TaskItem({
   onCancel: () => void
 }) {
   return (
-    <div className="group flex items-start gap-2 px-3 py-1.5 hover:bg-bg-tertiary transition-colors">
+    <div className="group flex items-start gap-2 px-3 py-1.5 hover:bg-[var(--bg-hover)] transition-colors duration-150">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${priorityColor(task.priority)}`}>
+          <span className={`w-5 h-5 rounded text-[10px] font-bold flex items-center justify-center shrink-0 ${priorityColor(task.priority)}`}>
             {task.priority}
           </span>
-          <span className="text-xs text-text-primary truncate">{task.title}</span>
+          <span className="text-xs text-[var(--text-primary)] truncate">{task.title}</span>
         </div>
-        <span className={`text-[9px] px-1 py-0.5 rounded mt-0.5 inline-block ${statusColor(task.status)}`}>
+        <span className={`text-[10px] font-mono px-1 py-0.5 rounded mt-0.5 inline-block ${statusColor(task.status)}`}>
           {task.status}
         </span>
       </div>
-      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0">
         {task.status === 'NeedsReview' && (
           <button
             onClick={onApprove}
-            className="p-0.5 rounded hover:bg-accent-green/20 text-accent-green transition-colors"
+            className="p-0.5 rounded hover:bg-green-500/20 text-green-400 transition-colors duration-150 cursor-pointer"
             title="Approve"
           >
             <CheckCircle size={12} />
@@ -65,7 +65,7 @@ function TaskItem({
         {task.status !== 'Completed' && task.status !== 'Cancelled' && (
           <button
             onClick={onCancel}
-            className="p-0.5 rounded hover:bg-accent-red/20 text-accent-red transition-colors"
+            className="p-0.5 rounded hover:bg-red-500/20 text-red-400 transition-colors duration-150 cursor-pointer"
             title="Cancel"
           >
             <XCircle size={12} />
@@ -93,10 +93,10 @@ function AddTaskDialog({
   }
 
   return (
-    <div className="px-3 py-2 border-t border-border space-y-2">
+    <div className="px-3 py-2 border-t border-[var(--border-color)] space-y-2">
       <input
         type="text"
-        className="w-full bg-bg-tertiary text-xs text-text-primary rounded px-2 py-1.5 outline-none border border-border focus:border-accent-blue transition-colors placeholder-text-secondary"
+        className="w-full bg-[var(--bg-elevated)] text-xs text-[var(--text-primary)] rounded-md px-2 py-1.5 outline-none border border-[var(--border-color)] focus:border-[var(--accent-blue)] transition-colors duration-150 placeholder:text-[var(--text-muted)]"
         placeholder="Task title..."
         value={title}
         onChange={e => setTitle(e.target.value)}
@@ -110,8 +110,8 @@ function AddTaskDialog({
         {(['P0', 'P1', 'P2', 'P3'] as TaskPriority[]).map(p => (
           <button
             key={p}
-            className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors ${
-              priority === p ? priorityColor(p) : 'bg-bg-tertiary text-text-secondary'
+            className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors duration-150 cursor-pointer ${
+              priority === p ? priorityColor(p) : 'bg-[var(--bg-elevated)] text-[var(--text-muted)]'
             }`}
             onClick={() => setPriority(p)}
           >
@@ -120,13 +120,13 @@ function AddTaskDialog({
         ))}
         <div className="flex-1" />
         <button
-          className="text-[10px] px-2 py-0.5 rounded bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 transition-colors"
+          className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-colors duration-150 cursor-pointer"
           onClick={handleSubmit}
         >
           Add
         </button>
         <button
-          className="text-[10px] px-2 py-0.5 rounded bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
+          className="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
           onClick={onClose}
         >
           Cancel
@@ -153,24 +153,24 @@ export function TaskPool() {
   const displayTasks = expanded ? tasks : activeTasks.slice(0, 5)
 
   return (
-    <div className="border-t border-border">
+    <div className="border-t border-[var(--border-color)]">
       {/* Header */}
       <button
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-bg-tertiary transition-colors"
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-[var(--bg-hover)] transition-colors duration-150 cursor-pointer"
         onClick={() => setExpanded(prev => !prev)}
       >
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-text-secondary flex items-center gap-1">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
           <ListTodo size={11} />
           Tasks
           {activeTasks.length > 0 && (
-            <span className="ml-1 text-[9px] px-1 py-0.5 rounded-full bg-accent-blue/20 text-accent-blue">
+            <span className="ml-1 text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-bold">
               {activeTasks.length}
             </span>
           )}
         </span>
         <div className="flex items-center gap-1">
           <button
-            className="p-0.5 rounded hover:bg-bg-secondary text-text-secondary hover:text-text-primary transition-colors"
+            className="p-0.5 rounded hover:bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
             onClick={(e) => {
               e.stopPropagation()
               refresh()
@@ -180,7 +180,7 @@ export function TaskPool() {
             <RefreshCw size={10} className={loading ? 'animate-spin' : ''} />
           </button>
           <button
-            className="p-0.5 rounded hover:bg-bg-secondary text-text-secondary hover:text-accent-green transition-colors"
+            className="p-0.5 rounded hover:bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--accent-green)] transition-colors duration-150 cursor-pointer"
             onClick={(e) => {
               e.stopPropagation()
               setShowAddDialog(true)
@@ -190,7 +190,7 @@ export function TaskPool() {
           >
             <Plus size={12} />
           </button>
-          {expanded ? <ChevronUp size={12} className="text-text-secondary" /> : <ChevronDown size={12} className="text-text-secondary" />}
+          {expanded ? <ChevronUp size={12} className="text-[var(--text-muted)]" /> : <ChevronDown size={12} className="text-[var(--text-muted)]" />}
         </div>
       </button>
 
@@ -198,7 +198,7 @@ export function TaskPool() {
       {expanded && (
         <div className="max-h-[200px] overflow-y-auto">
           {displayTasks.length === 0 ? (
-            <div className="px-3 py-3 text-xs text-text-secondary italic text-center">
+            <div className="px-3 py-3 text-xs text-[var(--text-muted)] italic text-center">
               {loading ? 'Loading tasks...' : 'No tasks'}
             </div>
           ) : (

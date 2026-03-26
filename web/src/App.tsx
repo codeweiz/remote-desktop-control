@@ -187,7 +187,7 @@ export default function App() {
   const showChat = isMobile ? mobileTab === 'chat' : agentPanelVisible
 
   return (
-    <div className="h-full w-full flex flex-col bg-bg-primary">
+    <div className="h-full w-full flex flex-col bg-[var(--bg-primary)]">
       {/* Top bar */}
       <TopBar
         connectionState={statusConnection}

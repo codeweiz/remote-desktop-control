@@ -10,10 +10,10 @@ interface ToastItem {
 
 function triggerIcon(trigger: NotificationEvent['trigger']) {
   switch (trigger) {
-    case 'agent': return <Bot size={14} className="text-accent-purple" />
-    case 'task': return <ListTodo size={14} className="text-accent-orange" />
-    case 'session': return <Terminal size={14} className="text-accent-green" />
-    case 'system': return <AlertCircle size={14} className="text-accent-blue" />
+    case 'agent': return <Bot size={14} className="text-[var(--accent-purple)]" />
+    case 'task': return <ListTodo size={14} className="text-[var(--accent-amber)]" />
+    case 'session': return <Terminal size={14} className="text-[var(--accent-green)]" />
+    case 'system': return <AlertCircle size={14} className="text-[var(--accent-cyan)]" />
   }
 }
 
@@ -73,7 +73,7 @@ export function NotificationToast({ onNavigateToSession }: NotificationToastProp
       {toasts.map(toast => (
         <div
           key={toast.notification.id}
-          className="flex items-start gap-2 bg-bg-secondary border border-border rounded-lg px-3 py-2 shadow-lg animate-slide-in cursor-pointer hover:bg-bg-tertiary transition-colors"
+          className="flex items-start gap-2 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded-lg px-3 py-2.5 shadow-xl animate-slide-in cursor-pointer hover:bg-[var(--bg-secondary)] transition-colors duration-150"
           onClick={() => {
             if (toast.notification.session_id && onNavigateToSession) {
               onNavigateToSession(toast.notification.session_id)
@@ -83,13 +83,13 @@ export function NotificationToast({ onNavigateToSession }: NotificationToastProp
         >
           <span className="shrink-0 mt-0.5">{triggerIcon(toast.notification.trigger)}</span>
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-text-primary">{toast.notification.summary}</p>
+            <p className="text-xs text-[var(--text-primary)]">{toast.notification.summary}</p>
             {toast.notification.session_name && (
-              <p className="text-[10px] text-text-secondary mt-0.5">{toast.notification.session_name}</p>
+              <p className="text-[10px] text-[var(--text-muted)] mt-0.5 font-mono">{toast.notification.session_name}</p>
             )}
           </div>
           <button
-            className="shrink-0 p-0.5 rounded hover:bg-bg-secondary text-text-secondary hover:text-text-primary transition-colors"
+            className="shrink-0 p-0.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
             onClick={(e) => {
               e.stopPropagation()
               dismissToast(toast.notification.id)

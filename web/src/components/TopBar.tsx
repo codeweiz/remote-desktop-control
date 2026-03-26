@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Sun, Moon, Settings, Wifi, WifiOff, QrCode, Menu } from 'lucide-react'
+import { Sun, Moon, Settings, Wifi, WifiOff, QrCode, Menu, Hexagon } from 'lucide-react'
 import type { ConnectionState, Theme } from '../lib/types'
 import { QRCodeModal } from './QRCodeModal'
 
@@ -24,63 +24,66 @@ export function TopBar({
   const [qrOpen, setQrOpen] = useState(false)
 
   return (
-    <div className="h-10 flex items-center justify-between px-4 bg-bg-secondary border-b border-border shrink-0">
+    <div className="h-10 flex items-center justify-between px-3 bg-[var(--bg-secondary)] border-b border-[var(--border-color)] shrink-0 select-none">
       {/* Left: Logo + Mobile hamburger */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5">
         {onToggleSidebar && (
           <button
             onClick={onToggleSidebar}
-            className="md:hidden p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
+            className="md:hidden w-8 h-8 flex items-center justify-center rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
           >
             <Menu size={16} />
           </button>
         )}
-        <span className="font-bold text-sm tracking-wider text-accent-green">RTB</span>
-        <span className="text-xs text-text-secondary">2.0</span>
-      </div>
+        <div className="flex items-center gap-1.5">
+          <Hexagon size={16} className="text-[var(--accent-green)]" />
+          <span className="font-semibold text-sm text-[var(--text-primary)]">RTB</span>
+          <span className="text-[10px] font-mono text-[var(--text-muted)]">2.0</span>
+        </div>
 
-      {/* Center: Connection status */}
-      <div className="flex items-center gap-2 text-xs">
-        {isConnected ? (
-          <>
-            <Wifi size={14} className="text-accent-green" />
-            <span className="text-accent-green">Connected</span>
-          </>
-        ) : (
-          <>
-            <WifiOff size={14} className="text-accent-red" />
-            <span className="text-accent-red">
-              {connectionState === 'connecting' ? 'Connecting...' : 'Disconnected'}
-            </span>
-          </>
-        )}
-        {latency !== null && isConnected && (
-          <span className="text-text-secondary ml-1">{latency}ms</span>
-        )}
+        {/* Connection status */}
+        <div className="flex items-center gap-1.5 ml-2 px-2 py-1 rounded-md bg-[var(--bg-primary)]">
+          {isConnected ? (
+            <>
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)] animate-pulse-dot" />
+              <span className="text-[11px] text-[var(--accent-green)] font-medium">Connected</span>
+            </>
+          ) : (
+            <>
+              <WifiOff size={12} className="text-[var(--accent-red)]" />
+              <span className="text-[11px] text-[var(--accent-red)] font-medium">
+                {connectionState === 'connecting' ? 'Connecting...' : 'Disconnected'}
+              </span>
+            </>
+          )}
+          {latency !== null && isConnected && (
+            <span className="text-[11px] font-mono text-[var(--text-muted)] ml-0.5">{latency}ms</span>
+          )}
+        </div>
       </div>
 
       {/* Right: Actions */}
-      <div className="flex items-center gap-1">
-        <button
-          onClick={() => setQrOpen(true)}
-          className="p-1.5 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
-          title="QR Code"
-        >
-          <QrCode size={16} />
-        </button>
+      <div className="flex items-center gap-0.5">
         <button
           onClick={onToggleTheme}
-          className="p-1.5 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
+          className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]/50"
           title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
         >
-          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+        </button>
+        <button
+          onClick={() => setQrOpen(true)}
+          className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]/50"
+          title="QR Code"
+        >
+          <QrCode size={15} />
         </button>
         <button
           onClick={onOpenSettings}
-          className="p-1.5 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
+          className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]/50"
           title="Settings"
         >
-          <Settings size={16} />
+          <Settings size={15} />
         </button>
       </div>
 

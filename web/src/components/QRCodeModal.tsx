@@ -20,7 +20,7 @@ export function QRCodeModal({ isOpen, onClose }: QRCodeModalProps) {
     QRCode.toString(deepLink, {
       type: 'svg',
       color: {
-        dark: '#c9d1d9',
+        dark: '#f1f5f9',
         light: '#00000000',
       },
       margin: 1,
@@ -45,18 +45,18 @@ export function QRCodeModal({ isOpen, onClose }: QRCodeModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 command-palette-overlay flex items-center justify-center"
+      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="w-[320px] max-w-[90vw] bg-bg-secondary border border-border rounded-xl shadow-2xl overflow-hidden">
+      <div className="w-[320px] max-w-[90vw] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-2xl overflow-hidden animate-fade-in">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold text-text-primary">Connect via QR Code</h2>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)]">
+          <h2 className="text-sm font-semibold text-[var(--text-primary)]">Connect via QR Code</h2>
           <button
             onClick={onClose}
-            className="p-1 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
+            className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
           >
             <X size={16} />
           </button>
@@ -66,29 +66,29 @@ export function QRCodeModal({ isOpen, onClose }: QRCodeModalProps) {
         <div className="flex flex-col items-center p-6">
           {svgData ? (
             <div
-              className="bg-bg-tertiary rounded-lg p-4"
+              className="bg-[var(--bg-elevated)] rounded-lg p-4"
               dangerouslySetInnerHTML={{ __html: svgData }}
             />
           ) : (
-            <div className="w-[220px] h-[220px] bg-bg-tertiary rounded-lg flex items-center justify-center">
-              <span className="text-xs text-text-secondary">Generating...</span>
+            <div className="w-[220px] h-[220px] bg-[var(--bg-elevated)] rounded-lg flex items-center justify-center">
+              <span className="text-xs text-[var(--text-muted)]">Generating...</span>
             </div>
           )}
 
-          <p className="text-[10px] text-text-secondary mt-4 text-center max-w-[240px]">
+          <p className="text-[10px] text-[var(--text-muted)] mt-4 text-center max-w-[240px]">
             Scan this QR code with the RTB mobile app to connect to this server
           </p>
 
           {/* Deep link URL */}
           <div className="mt-3 w-full">
-            <div className="flex items-center gap-1 bg-bg-tertiary rounded-lg px-3 py-2 border border-border">
-              <code className="text-[10px] text-text-secondary flex-1 truncate">{deepLink}</code>
+            <div className="flex items-center gap-1 bg-[var(--bg-elevated)] rounded-md px-3 py-2 border border-[var(--border-color)]">
+              <code className="text-[10px] font-mono text-[var(--text-muted)] flex-1 truncate">{deepLink}</code>
               <button
                 onClick={handleCopy}
-                className="shrink-0 p-1 rounded hover:bg-bg-secondary text-text-secondary hover:text-text-primary transition-colors"
+                className="shrink-0 p-1 rounded-md hover:bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
                 title="Copy link"
               >
-                {copied ? <Check size={12} className="text-accent-green" /> : <Copy size={12} />}
+                {copied ? <Check size={12} className="text-[var(--accent-green)]" /> : <Copy size={12} />}
               </button>
             </div>
           </div>

@@ -46,33 +46,33 @@ export function SearchBar({ isVisible, onClose, onFindNext, onFindPrevious }: Se
   if (!isVisible) return null
 
   return (
-    <div className="absolute top-0 right-0 z-20 flex items-center gap-1 bg-bg-secondary border border-border rounded-bl-lg px-2 py-1 shadow-lg">
-      <Search size={12} className="text-text-secondary shrink-0" />
+    <div className="absolute top-0 right-0 z-20 flex items-center gap-1 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-bl-md px-2 py-1.5 shadow-lg animate-slide-in">
+      <Search size={12} className="text-[var(--text-muted)] shrink-0" />
       <input
         ref={inputRef}
         type="text"
-        className="w-48 bg-bg-tertiary text-xs text-text-primary rounded px-2 py-1 outline-none border border-transparent focus:border-accent-blue transition-colors placeholder-text-secondary"
+        className="w-48 bg-[var(--bg-elevated)] text-xs text-[var(--text-primary)] rounded-md px-2 py-1 outline-none border border-transparent focus:border-[var(--accent-blue)] transition-colors duration-150 placeholder:text-[var(--text-muted)]"
         placeholder="Search terminal..."
         value={query}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
       />
       <button
-        className="p-0.5 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
+        className="p-0.5 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
         onClick={() => onFindPrevious(query)}
         title="Previous (Shift+Enter)"
       >
         <ChevronUp size={14} />
       </button>
       <button
-        className="p-0.5 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
+        className="p-0.5 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
         onClick={() => onFindNext(query)}
         title="Next (Enter)"
       >
         <ChevronDown size={14} />
       </button>
       <button
-        className="p-0.5 rounded hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
+        className="p-0.5 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
         onClick={onClose}
         title="Close (Esc)"
       >

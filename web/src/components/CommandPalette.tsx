@@ -110,25 +110,27 @@ export function CommandPalette({
 
   return (
     <div
-      className="fixed inset-0 z-50 command-palette-overlay flex items-start justify-center pt-[20vh]"
+      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center pt-[20vh]"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="w-[500px] max-w-[90vw] bg-bg-secondary border border-border rounded-xl shadow-2xl overflow-hidden">
+      <div className="w-[500px] max-w-[90vw] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-2xl overflow-hidden animate-fade-in">
         {/* Search input */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-          <Search size={16} className="text-text-secondary shrink-0" />
+        <div className="flex items-center gap-2 border-b border-[var(--border-color)]">
+          <div className="pl-4">
+            <Search size={16} className="text-[var(--text-muted)] shrink-0" />
+          </div>
           <input
             ref={inputRef}
             type="text"
-            className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder-text-secondary"
+            className="flex-1 w-full bg-transparent px-2 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
             placeholder="Type a command..."
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
           />
-          <kbd className="text-[10px] px-1.5 py-0.5 rounded bg-bg-tertiary text-text-secondary border border-border">
+          <kbd className="text-[10px] font-mono bg-[var(--bg-primary)] px-1.5 py-0.5 rounded text-[var(--text-muted)] mr-3">
             ESC
           </kbd>
         </div>
@@ -136,7 +138,7 @@ export function CommandPalette({
         {/* Results */}
         <div className="max-h-[300px] overflow-y-auto py-1">
           {filtered.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-text-secondary">
+            <div className="px-4 py-6 text-center text-sm text-[var(--text-muted)]">
               No matching commands
             </div>
           ) : (
@@ -144,21 +146,26 @@ export function CommandPalette({
               <div
                 key={action.id}
                 className={`
-                  flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors
-                  ${index === selectedIndex ? 'bg-bg-tertiary' : 'hover:bg-bg-tertiary/50'}
+                  flex items-center gap-3 px-4 py-2 text-sm cursor-pointer transition-colors duration-150
+                  ${index === selectedIndex ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'}
                 `}
                 onClick={() => action.action()}
                 onMouseEnter={() => setSelectedIndex(index)}
               >
-                <span className="text-text-secondary">{action.icon}</span>
+                <span className="text-[var(--text-muted)]">{action.icon}</span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm text-text-primary">{action.label}</div>
+                  <div className="text-sm text-[var(--text-primary)]">{action.label}</div>
                   {action.description && (
-                    <div className="text-[11px] text-text-secondary truncate">{action.description}</div>
+                    <div className="text-[11px] text-[var(--text-muted)] truncate">{action.description}</div>
                   )}
                 </div>
+                {action.shortcut && (
+                  <span className="text-[10px] font-mono bg-[var(--bg-primary)] px-1.5 py-0.5 rounded text-[var(--text-muted)]">
+                    {action.shortcut}
+                  </span>
+                )}
                 {index === selectedIndex && (
-                  <ArrowRight size={14} className="text-text-secondary shrink-0" />
+                  <ArrowRight size={14} className="text-[var(--text-muted)] shrink-0" />
                 )}
               </div>
             ))

@@ -1,4 +1,4 @@
-import { Plus, Terminal, Bot, Trash2, ChevronRight, Edit3, Copy, GitBranch } from 'lucide-react'
+import { Plus, Terminal, Bot, Trash2, Edit3, Copy, GitBranch } from 'lucide-react'
 import type { Session } from '../lib/types'
 import type { SessionTree } from '../hooks/useSessions'
 import { ContextMenu, useContextMenu } from './ContextMenu'
@@ -17,19 +17,27 @@ interface SessionListProps {
 }
 
 function StatusDot({ status, kind }: { status: string; kind: string }) {
-  let colorClass = 'bg-gray-500'
-  if (kind === 'agent') {
-    colorClass = 'bg-accent-purple'
-  } else if (status === 'running') {
-    colorClass = 'bg-accent-green'
-  } else if (status === 'exited') {
-    colorClass = 'bg-gray-500'
+  const isAgent = kind === 'agent'
+
+  if (isAgent) {
+    return (
+      <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-purple)] shrink-0 animate-pulse-dot" />
+    )
+  }
+
+  let colorClass = 'bg-[var(--text-muted)]'
+  let animate = ''
+  if (status === 'running') {
+    colorClass = 'bg-[var(--accent-green)]'
+    animate = 'animate-pulse-dot'
   } else if (status === 'error') {
-    colorClass = 'bg-accent-red'
+    colorClass = 'bg-[var(--accent-red)]'
+  } else if (status === 'idle') {
+    colorClass = 'bg-[var(--accent-amber)]'
   }
 
   return (
-    <span className={`w-2 h-2 rounded-full ${colorClass} shrink-0`} />
+    <span className={`w-1.5 h-1.5 rounded-full ${colorClass} ${animate} shrink-0`} />
   )
 }
 
@@ -46,22 +54,25 @@ function SessionItem({
   onDelete: () => void
   onContextMenu: (e: React.MouseEvent) => void
 }) {
+  const isAgent = session.kind === 'agent'
+  const borderColor = isAgent ? 'border-[var(--accent-purple)]' : 'border-[var(--accent-green)]'
+
   return (
     <div
       className={`
-        group flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs
-        hover:bg-bg-tertiary transition-colors
-        ${isActive ? 'bg-bg-tertiary border-l-2 border-accent-blue' : 'border-l-2 border-transparent'}
+        group flex items-center gap-2 px-3 py-1.5 cursor-pointer text-sm
+        hover:bg-[var(--bg-hover)] rounded-md mx-1 transition-colors duration-150
+        ${isActive ? `bg-[var(--bg-elevated)] border-l-2 ${borderColor}` : 'border-l-2 border-transparent'}
       `}
       onClick={onSelect}
       onContextMenu={onContextMenu}
     >
       <StatusDot status={session.status} kind={session.kind} />
-      <span className="truncate flex-1 text-text-primary">
+      <span className="truncate flex-1 text-[var(--text-primary)] text-sm">
         {session.name || `${session.kind}-${session.id.slice(0, 6)}`}
       </span>
       <button
-        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-secondary text-text-secondary hover:text-accent-red transition-all"
+        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--accent-red)] transition-all duration-150 cursor-pointer"
         onClick={(e) => {
           e.stopPropagation()
           onDelete()
@@ -127,16 +138,16 @@ export function SessionList({
   if (!sidebarVisible) return null
 
   return (
-    <div className="w-[220px] bg-bg-secondary border-r border-border flex flex-col shrink-0 overflow-hidden max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-[260px] max-md:shadow-2xl">
+    <div className="w-[240px] bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col shrink-0 overflow-hidden max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-[260px] max-md:shadow-2xl">
       {/* Terminals section */}
       <div className="flex-1 overflow-y-auto">
         <div className="flex items-center justify-between px-3 py-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-secondary flex items-center gap-1">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
             <Terminal size={11} />
             Terminals
           </span>
           <button
-            className="p-0.5 rounded hover:bg-bg-tertiary text-text-secondary hover:text-accent-green transition-colors"
+            className="p-0.5 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--accent-green)] transition-colors duration-150 cursor-pointer"
             onClick={onCreateTerminal}
             title="New terminal"
           >
@@ -144,7 +155,7 @@ export function SessionList({
           </button>
         </div>
         {tree.terminals.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-text-secondary italic">
+          <div className="px-3 py-2 text-xs text-[var(--text-muted)] italic">
             No terminals
           </div>
         ) : (
@@ -161,13 +172,13 @@ export function SessionList({
         )}
 
         {/* Agents section */}
-        <div className="flex items-center justify-between px-3 py-2 mt-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-secondary flex items-center gap-1">
+        <div className="flex items-center justify-between px-3 py-2 mt-3">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
             <Bot size={11} />
             Agents
           </span>
           <button
-            className="p-0.5 rounded hover:bg-bg-tertiary text-text-secondary hover:text-accent-purple transition-colors"
+            className="p-0.5 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--accent-purple)] transition-colors duration-150 cursor-pointer"
             onClick={onCreateAgent}
             title="New agent"
           >
@@ -175,7 +186,7 @@ export function SessionList({
           </button>
         </div>
         {tree.agents.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-text-secondary italic">
+          <div className="px-3 py-2 text-xs text-[var(--text-muted)] italic">
             No agents
           </div>
         ) : (
@@ -195,12 +206,22 @@ export function SessionList({
       {/* Task Pool */}
       <TaskPool />
 
-      {/* Footer hint */}
-      <div className="px-3 py-2 border-t border-border">
-        <div className="flex items-center gap-1 text-[10px] text-text-secondary">
-          <ChevronRight size={10} />
-          <span>Right-click for more options</span>
-        </div>
+      {/* Create buttons at bottom */}
+      <div className="px-2 pb-2 pt-1 border-t border-[var(--border-color)] space-y-1.5">
+        <button
+          onClick={onCreateTerminal}
+          className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-dashed border-[var(--border-color)] rounded-md py-1.5 w-full hover:bg-[var(--bg-hover)] transition-colors duration-150 cursor-pointer flex items-center justify-center gap-1.5"
+        >
+          <Plus size={12} />
+          New Terminal
+        </button>
+        <button
+          onClick={onCreateAgent}
+          className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-dashed border-[var(--border-color)] rounded-md py-1.5 w-full hover:bg-[var(--bg-hover)] transition-colors duration-150 cursor-pointer flex items-center justify-center gap-1.5"
+        >
+          <Plus size={12} />
+          New Agent
+        </button>
       </div>
 
       {/* Context menu overlay */}

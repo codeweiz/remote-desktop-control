@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Send, Bot, User, Cpu } from 'lucide-react'
+import { Send, Bot, User, Cpu, X } from 'lucide-react'
 import type { Session, AgentMessage, WsMessage } from '../lib/types'
 import { useWebSocket } from '../hooks/useWebSocket'
 
@@ -76,16 +76,16 @@ export function AgentChat({ session, isVisible, onToggle }: AgentChatProps) {
   if (!isVisible) return null
 
   return (
-    <div className="w-[340px] bg-bg-secondary border-l border-border flex flex-col shrink-0">
+    <div className="w-[340px] bg-[var(--bg-secondary)] border-l border-[var(--border-color)] flex flex-col shrink-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+      <div className="h-10 px-3 flex items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0">
         <div className="flex items-center gap-2">
-          <Bot size={14} className="text-accent-purple" />
-          <span className="text-xs font-medium text-text-primary">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-purple)] animate-pulse-dot" />
+          <span className="text-sm font-medium text-[var(--text-primary)]">
             {session ? (session.name || `Agent ${session.id.slice(0, 6)}`) : 'Agent Chat'}
           </span>
           {session && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-tertiary text-accent-purple">
+            <span className="text-[10px] bg-[var(--bg-elevated)] px-1.5 py-0.5 rounded font-mono text-[var(--text-muted)]">
               <Cpu size={9} className="inline mr-0.5" />
               agent
             </span>
@@ -93,9 +93,10 @@ export function AgentChat({ session, isVisible, onToggle }: AgentChatProps) {
         </div>
         <button
           onClick={onToggle}
-          className="text-xs text-text-secondary hover:text-text-primary transition-colors"
+          className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
+          title="Hide panel"
         >
-          Hide
+          <X size={14} />
         </button>
       </div>
 
@@ -103,35 +104,35 @@ export function AgentChat({ session, isVisible, onToggle }: AgentChatProps) {
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {!session ? (
           <div className="flex-1 flex items-center justify-center h-full">
-            <div className="text-center text-text-secondary">
-              <Bot size={32} className="mx-auto mb-2 opacity-20" />
-              <p className="text-xs">Select an agent session</p>
-              <p className="text-[10px] mt-1">or create one from the sidebar</p>
+            <div className="text-center text-[var(--text-muted)] animate-fade-in">
+              <Bot size={36} className="mx-auto mb-3 text-[var(--accent-purple)] opacity-30" />
+              <p className="text-sm font-medium text-[var(--text-secondary)]">Select an agent session</p>
+              <p className="text-xs mt-1 text-[var(--text-muted)]">or create one from the sidebar</p>
             </div>
           </div>
         ) : messages.length === 0 ? (
           <div className="flex items-center justify-center h-32">
-            <div className="text-center text-text-secondary">
-              <p className="text-xs">No messages yet</p>
-              <p className="text-[10px] mt-1">
+            <div className="text-center text-[var(--text-muted)] animate-fade-in">
+              <p className="text-sm">No messages yet</p>
+              <p className="text-xs mt-1">
                 {connectionState === 'connected' ? 'Type a message below' : 'Connecting...'}
               </p>
             </div>
           </div>
         ) : (
           messages.map(msg => (
-            <div key={msg.id} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+            <div key={msg.id} className={`flex gap-2 animate-fade-in ${msg.role === 'user' ? 'justify-end' : ''}`}>
               {msg.role !== 'user' && (
-                <div className="w-6 h-6 rounded bg-accent-purple/20 flex items-center justify-center shrink-0 mt-0.5">
-                  <Bot size={12} className="text-accent-purple" />
+                <div className="w-6 h-6 rounded-md bg-[var(--accent-purple)]/15 flex items-center justify-center shrink-0 mt-0.5">
+                  <Bot size={12} className="text-[var(--accent-purple)]" />
                 </div>
               )}
               <div
                 className={`
-                  max-w-[85%] rounded-lg px-3 py-2 text-xs
+                  max-w-[85%] text-sm
                   ${msg.role === 'user'
-                    ? 'bg-accent-blue/20 text-text-primary'
-                    : 'bg-bg-tertiary text-text-primary'
+                    ? 'bg-[var(--bg-elevated)] rounded-lg px-3 py-2 text-[var(--text-primary)]'
+                    : 'bg-transparent border-l-2 border-[var(--accent-purple)] pl-3 py-1 text-[var(--text-primary)]'
                   }
                 `}
               >
@@ -139,12 +140,12 @@ export function AgentChat({ session, isVisible, onToggle }: AgentChatProps) {
                   <ReactMarkdown>{msg.content}</ReactMarkdown>
                 </div>
                 {msg.model && (
-                  <div className="text-[10px] text-text-secondary mt-1">{msg.model}</div>
+                  <div className="text-[10px] font-mono text-[var(--text-muted)] mt-1">{msg.model}</div>
                 )}
               </div>
               {msg.role === 'user' && (
-                <div className="w-6 h-6 rounded bg-accent-blue/20 flex items-center justify-center shrink-0 mt-0.5">
-                  <User size={12} className="text-accent-blue" />
+                <div className="w-6 h-6 rounded-md bg-[var(--accent-blue)]/15 flex items-center justify-center shrink-0 mt-0.5">
+                  <User size={12} className="text-[var(--accent-blue)]" />
                 </div>
               )}
             </div>
@@ -155,10 +156,10 @@ export function AgentChat({ session, isVisible, onToggle }: AgentChatProps) {
 
       {/* Input */}
       {session && (
-        <div className="p-3 border-t border-border">
-          <div className="flex items-end gap-2 bg-bg-tertiary rounded-lg p-2">
+        <div className="border-t border-[var(--border-color)] p-2">
+          <div className="flex items-end gap-2">
             <textarea
-              className="flex-1 bg-transparent text-xs text-text-primary resize-none outline-none placeholder-text-secondary"
+              className="flex-1 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] resize-none outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent-purple)] focus:ring-1 focus:ring-[var(--accent-purple)]/30 transition-all duration-150"
               placeholder="Message agent..."
               rows={1}
               value={input}
@@ -167,11 +168,11 @@ export function AgentChat({ session, isVisible, onToggle }: AgentChatProps) {
               disabled={connectionState !== 'connected'}
             />
             <button
-              className="p-1 rounded hover:bg-bg-secondary text-text-secondary hover:text-accent-blue transition-colors disabled:opacity-30"
+              className="p-2 rounded-lg hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--accent-purple)] transition-colors duration-150 disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
               onClick={handleSend}
               disabled={!input.trim() || connectionState !== 'connected'}
             >
-              <Send size={14} />
+              <Send size={16} />
             </button>
           </div>
         </div>
