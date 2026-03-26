@@ -21,6 +21,7 @@ pub struct CoreState {
     pub event_bus: Arc<event_bus::EventBus>,
     pub pty_manager: Arc<pty::manager::PtyManager>,
     pub session_store: Arc<session::store::SessionStore>,
+    pub agent_manager: Arc<agent::manager::AgentManager>,
 }
 
 impl CoreState {
@@ -39,11 +40,16 @@ impl CoreState {
             Arc::clone(&config),
         ));
 
+        let agent_manager = Arc::new(agent::manager::AgentManager::new(
+            Arc::clone(&event_bus),
+        ));
+
         Ok(Self {
             config,
             event_bus,
             pty_manager,
             session_store,
+            agent_manager,
         })
     }
 }

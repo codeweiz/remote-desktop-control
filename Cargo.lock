@@ -1909,6 +1909,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "mime_guess",
+ "nanoid",
  "rtb-core",
  "rust-embed",
  "serde",

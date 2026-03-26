@@ -60,7 +60,7 @@ pub fn create_router(state: AppState) -> Router {
     // so they bypass the auth middleware (which would redirect on token= queries).
     let ws_routes = Router::new()
         .route("/ws/terminal", get(ws::ws_terminal))
-        .route("/ws/agent", get(ws::ws_agent_placeholder))
+        .route("/ws/agent", get(ws::ws_agent))
         .route("/ws/status", get(ws::ws_status));
 
     Router::new()
