@@ -81,6 +81,7 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
         plugins_dir,
         Arc::clone(&core.event_bus),
         config.plugins.jsonrpc_timeout_secs,
+        config.server.port,
     ));
     if let Err(e) = plugin_manager.start_all().await {
         tracing::warn!(error = %e, "Plugin manager start_all encountered errors (continuing)");
