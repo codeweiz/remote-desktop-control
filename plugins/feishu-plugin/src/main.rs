@@ -778,7 +778,9 @@ async fn run_ws_message_listener(
         config = new_config;
 
         let service_id = extract_service_id(&ws_url);
-        info!(url = %ws_url, service_id, "feishu: connecting WebSocket");
+        // Log truncated URL to avoid leaking auth tokens in query params
+        let safe_url = ws_url.split('?').next().unwrap_or(&ws_url);
+        info!(url = %safe_url, service_id, "feishu: connecting WebSocket");
 
         let ws_stream = match tokio_tungstenite::connect_async(&ws_url).await {
             Ok((stream, _response)) => stream,
@@ -1079,12 +1081,12 @@ async fn handle_initialize(
         }
     }
 
-    // Send connected status notification
+    // Send authenticated status (HTTP auth OK, WebSocket not yet connected)
     let _ = notification_tx
         .send(JsonRpcNotification::new(
             "im/on_status",
             Some(serde_json::json!({
-                "status": "connected",
+                "status": "authenticated",
             })),
         ))
         .await;
