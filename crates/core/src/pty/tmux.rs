@@ -139,6 +139,13 @@ pub fn new_session(session_id: &str, cwd: &Path) -> Result<()> {
         );
     }
 
+    // Enable mouse mode so tmux handles mouse wheel scrolling natively.
+    // Without this, xterm.js (scrollback:0) forwards wheel events as
+    // up/down arrow keys to the shell.
+    let _ = Command::new("tmux")
+        .args(["set-option", "-t", &name, "mouse", "on"])
+        .output();
+
     debug!(session = %name, "tmux session created and environment configured");
     Ok(())
 }
