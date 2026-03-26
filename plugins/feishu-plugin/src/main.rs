@@ -21,6 +21,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
+use prost::Message as ProstMessage;
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
@@ -111,6 +114,89 @@ impl JsonRpcNotification {
             jsonrpc: JSONRPC_VERSION.to_string(),
             method: method.into(),
             params,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Feishu WebSocket long connection types (Protobuf)
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct WsFrame {
+    #[prost(uint64, required, tag = "1")]
+    pub seq_id: u64,
+    #[prost(uint64, required, tag = "2")]
+    pub log_id: u64,
+    #[prost(int32, required, tag = "3")]
+    pub service: i32,
+    #[prost(int32, required, tag = "4")]
+    pub method: i32,
+    #[prost(message, repeated, tag = "5")]
+    pub headers: Vec<WsFrameHeader>,
+    #[prost(string, optional, tag = "6")]
+    pub payload_encoding: Option<String>,
+    #[prost(string, optional, tag = "7")]
+    pub payload_type: Option<String>,
+    #[prost(bytes, optional, tag = "8")]
+    pub payload: Option<Vec<u8>>,
+    #[prost(string, optional, tag = "9")]
+    pub log_id_new: Option<String>,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct WsFrameHeader {
+    #[prost(string, required, tag = "1")]
+    pub key: String,
+    #[prost(string, required, tag = "2")]
+    pub value: String,
+}
+
+const WS_METHOD_CONTROL: i32 = 0;
+const WS_METHOD_DATA: i32 = 1;
+
+#[derive(Debug, Deserialize)]
+struct WsEndpointResponse {
+    code: i64,
+    #[serde(default)]
+    msg: String,
+    #[serde(default)]
+    data: Option<WsEndpointData>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(non_snake_case)]
+struct WsEndpointData {
+    URL: String,
+    #[serde(default)]
+    ClientConfig: Option<WsClientConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(non_snake_case)]
+struct WsClientConfig {
+    #[serde(default = "default_reconnect_count")]
+    ReconnectCount: i32,
+    #[serde(default = "default_reconnect_interval")]
+    ReconnectInterval: u64,
+    #[serde(default = "default_reconnect_nonce")]
+    ReconnectNonce: u64,
+    #[serde(default = "default_ping_interval")]
+    PingInterval: u64,
+}
+
+fn default_reconnect_count() -> i32 { -1 }
+fn default_reconnect_interval() -> u64 { 120 }
+fn default_reconnect_nonce() -> u64 { 30 }
+fn default_ping_interval() -> u64 { 120 }
+
+impl Default for WsClientConfig {
+    fn default() -> Self {
+        Self {
+            ReconnectCount: -1,
+            ReconnectInterval: 120,
+            ReconnectNonce: 30,
+            PingInterval: 120,
         }
     }
 }
@@ -514,21 +600,6 @@ impl FeishuClient {
         Ok(())
     }
 
-    /// Start polling for incoming messages (stub).
-    ///
-    /// Full receiving requires a webhook server or Feishu WebSocket subscription,
-    /// which will be implemented in a future iteration. For now this keeps the
-    /// background task alive.
-    async fn start_message_listener(
-        &self,
-        tx: mpsc::Sender<JsonRpcNotification>,
-    ) {
-        info!("feishu: message listener started (receiving not yet implemented)");
-        let _tx = tx;
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
-        }
-    }
 }
 
 /// Simple base64 decoder (standard alphabet, with optional padding).
@@ -575,6 +646,340 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         }
     }
     Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Feishu WebSocket helper functions
+// ---------------------------------------------------------------------------
+
+impl WsFrame {
+    fn get_header(&self, key: &str) -> Option<&str> {
+        self.headers.iter()
+            .find(|h| h.key == key)
+            .map(|h| h.value.as_str())
+    }
+}
+
+/// Fetch the Feishu WebSocket endpoint URL.
+/// NOTE: endpoint is at domain root, NOT under /open-apis/.
+async fn fetch_ws_endpoint(
+    http: &reqwest::Client,
+    app_id: &str,
+    app_secret: &str,
+) -> Result<(String, WsClientConfig), String> {
+    let resp = http
+        .post("https://open.feishu.cn/callback/ws/endpoint")
+        .header("Content-Type", "application/json")
+        .header("locale", "zh")
+        .json(&serde_json::json!({
+            "AppID": app_id,
+            "AppSecret": app_secret,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("fetch ws endpoint failed: {e}"))?;
+
+    let data: WsEndpointResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse ws endpoint response: {e}"))?;
+
+    if data.code != 0 {
+        return Err(format!("ws endpoint error (code={}): {}", data.code, data.msg));
+    }
+
+    let endpoint = data.data.ok_or("missing data in ws endpoint response")?;
+    let config = endpoint.ClientConfig.unwrap_or_default();
+    Ok((endpoint.URL, config))
+}
+
+fn extract_service_id(url: &str) -> i32 {
+    if let Some(query) = url.split('?').nth(1) {
+        for pair in query.split('&') {
+            if let Some(val) = pair.strip_prefix("service_id=") {
+                return val.parse().unwrap_or(0);
+            }
+        }
+    }
+    0
+}
+
+fn build_ping_frame(service_id: i32) -> Vec<u8> {
+    let frame = WsFrame {
+        seq_id: 0,
+        log_id: 0,
+        service: service_id,
+        method: WS_METHOD_CONTROL,
+        headers: vec![WsFrameHeader {
+            key: "type".to_string(),
+            value: "ping".to_string(),
+        }],
+        payload_encoding: None,
+        payload_type: None,
+        payload: None,
+        log_id_new: None,
+    };
+    frame.encode_to_vec()
+}
+
+fn build_ack_frame(original: &WsFrame, code: i32) -> Vec<u8> {
+    let ack_payload = serde_json::json!({
+        "code": code,
+        "headers": {},
+        "data": ""
+    });
+    let mut frame = original.clone();
+    frame.payload = Some(ack_payload.to_string().into_bytes());
+    frame.headers.push(WsFrameHeader {
+        key: "biz_rt".to_string(),
+        value: "0".to_string(),
+    });
+    frame.encode_to_vec()
+}
+
+// ---------------------------------------------------------------------------
+// Feishu WebSocket message listener
+// ---------------------------------------------------------------------------
+
+async fn run_ws_message_listener(
+    app_id: String,
+    app_secret: String,
+    http: reqwest::Client,
+    tx: mpsc::Sender<JsonRpcNotification>,
+) {
+    info!("feishu: starting WebSocket long connection listener");
+
+    let mut config = WsClientConfig::default();
+    let mut attempt = 0u32;
+
+    loop {
+        let (ws_url, new_config) = match fetch_ws_endpoint(&http, &app_id, &app_secret).await {
+            Ok(result) => {
+                attempt = 0;
+                result
+            }
+            Err(e) => {
+                if e.contains("code=514") || e.contains("code=403") {
+                    error!("feishu: WebSocket auth failed (fatal): {e}");
+                    let _ = tx.send(JsonRpcNotification::new(
+                        "im/on_status",
+                        Some(serde_json::json!({
+                            "status": "error",
+                            "message": format!("WebSocket auth failed: {e}"),
+                        })),
+                    )).await;
+                    return;
+                }
+                warn!("feishu: failed to get ws endpoint: {e}, will retry");
+                tokio::time::sleep(tokio::time::Duration::from_secs(config.ReconnectInterval)).await;
+                continue;
+            }
+        };
+        config = new_config;
+
+        let service_id = extract_service_id(&ws_url);
+        info!(url = %ws_url, service_id, "feishu: connecting WebSocket");
+
+        let ws_stream = match tokio_tungstenite::connect_async(&ws_url).await {
+            Ok((stream, _response)) => stream,
+            Err(e) => {
+                warn!("feishu: WebSocket connect failed: {e}");
+                if !reconnect_wait(&config, &mut attempt).await { return; }
+                continue;
+            }
+        };
+
+        info!("feishu: WebSocket connected");
+        let _ = tx.send(JsonRpcNotification::new(
+            "im/on_status",
+            Some(serde_json::json!({"status": "connected"})),
+        )).await;
+
+        let disconnect_reason = run_ws_session(ws_stream, service_id, &config, &tx).await;
+        warn!(reason = %disconnect_reason, "feishu: WebSocket disconnected");
+
+        let _ = tx.send(JsonRpcNotification::new(
+            "im/on_status",
+            Some(serde_json::json!({
+                "status": "disconnected",
+                "message": disconnect_reason,
+            })),
+        )).await;
+
+        if !reconnect_wait(&config, &mut attempt).await { return; }
+    }
+}
+
+async fn reconnect_wait(config: &WsClientConfig, attempt: &mut u32) -> bool {
+    *attempt += 1;
+    if config.ReconnectCount >= 0 && *attempt as i32 > config.ReconnectCount {
+        error!("feishu: max reconnect attempts reached, giving up");
+        return false;
+    }
+    let jitter_ms = rand::random::<u64>() % (config.ReconnectNonce * 1000 + 1);
+    let wait = tokio::time::Duration::from_millis(jitter_ms);
+    info!(attempt = *attempt, wait_ms = jitter_ms, "feishu: reconnecting after jitter");
+    tokio::time::sleep(wait).await;
+    true
+}
+
+async fn run_ws_session(
+    ws_stream: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    service_id: i32,
+    config: &WsClientConfig,
+    tx: &mpsc::Sender<JsonRpcNotification>,
+) -> String {
+    let (mut write, mut read) = ws_stream.split();
+
+    let ping_interval = tokio::time::Duration::from_secs(config.PingInterval);
+    let timeout = tokio::time::Duration::from_secs(300);
+    let mut last_recv = tokio::time::Instant::now();
+    let mut ping_ticker = tokio::time::interval(ping_interval);
+    ping_ticker.tick().await; // skip first immediate tick
+
+    loop {
+        tokio::select! {
+            msg = read.next() => {
+                match msg {
+                    Some(Ok(WsMessage::Binary(data))) => {
+                        last_recv = tokio::time::Instant::now();
+                        match WsFrame::decode(data.as_ref()) {
+                            Ok(frame) => {
+                                if frame.method == WS_METHOD_CONTROL {
+                                    if frame.get_header("type") == Some("pong") {
+                                        debug!("feishu: received pong");
+                                    }
+                                } else if frame.method == WS_METHOD_DATA {
+                                    handle_data_frame(&frame, &mut write, tx).await;
+                                }
+                            }
+                            Err(e) => {
+                                warn!("feishu: failed to decode protobuf frame: {e}");
+                            }
+                        }
+                    }
+                    Some(Ok(WsMessage::Close(_))) => {
+                        return "server closed connection".to_string();
+                    }
+                    Some(Ok(_)) => {
+                        last_recv = tokio::time::Instant::now();
+                    }
+                    Some(Err(e)) => {
+                        return format!("WebSocket error: {e}");
+                    }
+                    None => {
+                        return "WebSocket stream ended".to_string();
+                    }
+                }
+            }
+            _ = ping_ticker.tick() => {
+                let ping_data = build_ping_frame(service_id);
+                if let Err(e) = write.send(WsMessage::Binary(ping_data.into())).await {
+                    return format!("failed to send ping: {e}");
+                }
+                debug!("feishu: sent ping");
+
+                if last_recv.elapsed() > timeout {
+                    return "heartbeat timeout (300s)".to_string();
+                }
+            }
+        }
+    }
+}
+
+async fn handle_data_frame(
+    frame: &WsFrame,
+    write: &mut futures_util::stream::SplitSink<
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        WsMessage,
+    >,
+    tx: &mpsc::Sender<JsonRpcNotification>,
+) {
+    let header_type = frame.get_header("type").unwrap_or("");
+
+    // Send ACK immediately
+    let ack_data = build_ack_frame(frame, 200);
+    if let Err(e) = write.send(WsMessage::Binary(ack_data.into())).await {
+        warn!("feishu: failed to send ACK: {e}");
+    }
+
+    if header_type != "event" {
+        debug!(header_type, "feishu: ignoring non-event data frame");
+        return;
+    }
+
+    let payload = match &frame.payload {
+        Some(p) => p,
+        None => {
+            warn!("feishu: event frame has no payload");
+            return;
+        }
+    };
+
+    let event: serde_json::Value = match serde_json::from_slice(payload) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("feishu: failed to parse event JSON: {e}");
+            return;
+        }
+    };
+
+    let event_type = event
+        .pointer("/header/event_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if event_type != "im.message.receive_v1" {
+        debug!(event_type, "feishu: ignoring non-message event");
+        return;
+    }
+
+    let chat_id = event.pointer("/event/message/chat_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let message_type = event.pointer("/event/message/message_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("text");
+    let content_str = event.pointer("/event/message/content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let sender_id = event.pointer("/event/sender/sender_id/open_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let create_time: u64 = event.pointer("/event/message/create_time")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let message_id = event.pointer("/event/message/message_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let text = if message_type == "text" {
+        serde_json::from_str::<serde_json::Value>(content_str)
+            .ok()
+            .and_then(|v| v.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()))
+            .unwrap_or_else(|| content_str.to_string())
+    } else {
+        format!("[{message_type}] {content_str}")
+    };
+
+    info!(
+        chat_id,
+        sender_id,
+        message_id,
+        message_type,
+        "feishu: received message"
+    );
+
+    let _ = tx.send(JsonRpcNotification::new(
+        "im/on_message",
+        Some(serde_json::json!({
+            "text": text,
+            "sender": sender_id,
+            "channel": chat_id,
+            "timestamp": create_time,
+        })),
+    )).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -684,13 +1089,21 @@ async fn handle_initialize(
         ))
         .await;
 
-    // Start the message listener in background
-    let client_clone = Arc::clone(client);
+    // Start the WebSocket message listener in background (without holding Mutex)
     let notif_tx = notification_tx.clone();
-    tokio::spawn(async move {
-        let feishu = client_clone.lock().await;
-        feishu.start_message_listener(notif_tx).await;
-    });
+    {
+        let feishu = client.lock().await;
+        if !feishu.dry_run {
+            let app_id = feishu.app_id.clone();
+            let app_secret = feishu.app_secret.clone();
+            let http = feishu.http.clone();
+            tokio::spawn(async move {
+                run_ws_message_listener(app_id, app_secret, http, notif_tx).await;
+            });
+        } else {
+            info!("feishu: dry-run mode, skipping WebSocket listener");
+        }
+    }
 
     JsonRpcResponse::success(
         req.id,
