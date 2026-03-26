@@ -37,17 +37,18 @@ fn main() {
                     tracing::error!("Failed to start embedded daemon: {}", e);
                     return;
                 }
-                // Inject auth token into the WebView's localStorage so the frontend
-                // can authenticate API/WebSocket calls to the embedded server.
+                // Navigate the WebView to the actual server URL with the auth token.
+                // The embedded static files can't reach the HTTP/WS server (different origin),
+                // so we redirect to the real server address which serves the same frontend.
                 let state: tauri::State<'_, commands::DaemonStateRef> = app_handle.state();
-                let token = state.read().await.token.clone();
+                let (token, port) = {
+                    let s = state.read().await;
+                    (s.token.clone(), s.port)
+                };
                 if let Some(window) = app_handle.get_webview_window("main") {
-                    let js = format!(
-                        "localStorage.setItem('rtb_token', '{}'); window.location.reload();",
-                        token
-                    );
-                    let _ = window.eval(&js);
-                    tracing::info!("Injected auth token into WebView");
+                    let url = format!("http://127.0.0.1:{}?token={}", port, token);
+                    tracing::info!("Navigating WebView to {}", url);
+                    let _ = window.eval(&format!("window.location.href = '{}';", url));
                 }
             });
             Ok(())
