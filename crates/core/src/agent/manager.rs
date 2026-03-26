@@ -1,81 +1,57 @@
-//! Agent Manager — manages multiple ACP client sessions.
+//! Agent Manager — manages multiple ACP-backed agent sessions.
 //!
 //! Provides a centralized interface for creating, managing, and communicating
-//! with agent subprocesses across multiple sessions.
+//! with agent subprocesses across multiple sessions.  Uses `AcpBackend` as the
+//! single execution backend for all agent kinds.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
-use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 
 use crate::event_bus::EventBus;
 use crate::events::{AgentStatus, ControlEvent, DataEvent, ErrorClass, SessionId};
 
-use super::acp_client::{AcpClient, AcpError, AcpEvent};
-
-/// Restart strategy for agents.
-#[derive(Debug, Clone)]
-pub struct RestartPolicy {
-    /// Maximum number of restart attempts.
-    pub max_attempts: u32,
-    /// Base backoff in seconds.
-    pub backoff_base_secs: u64,
-    /// Maximum backoff in seconds.
-    pub backoff_max_secs: u64,
-}
-
-impl Default for RestartPolicy {
-    fn default() -> Self {
-        Self {
-            max_attempts: 3,
-            backoff_base_secs: 3,
-            backoff_max_secs: 30,
-        }
-    }
-}
+use super::acp_backend::AcpBackend;
+use super::event::{AgentEvent, AgentKind};
 
 /// Tracks state for a managed agent session.
 struct ManagedAgent {
-    client: AcpClient,
+    backend: AcpBackend,
     /// Human-readable session name.
     name: String,
+    /// The kind of agent (Claude, Gemini, etc.).
+    #[allow(dead_code)]
+    kind: AgentKind,
+    /// Working directory the agent was started in.
+    #[allow(dead_code)]
+    cwd: PathBuf,
     /// When the agent was created.
     created_at: DateTime<Utc>,
+    /// How many times this agent has been restarted.
     #[allow(dead_code)]
-    agent_binary: String,
     restart_count: u32,
-    restart_policy: RestartPolicy,
+    /// Optional companion terminal session for this agent.
+    #[allow(dead_code)]
+    companion_terminal_id: Option<String>,
 }
 
 /// Manages the lifecycle of all agent sessions.
 pub struct AgentManager {
     /// Active agents keyed by session ID.
-    agents: Arc<DashMap<SessionId, ManagedAgent>>,
+    agents: DashMap<SessionId, ManagedAgent>,
     /// Event bus for publishing control/data events.
     event_bus: Arc<EventBus>,
-    /// Default restart policy.
-    default_restart_policy: RestartPolicy,
 }
 
 impl AgentManager {
     /// Create a new agent manager.
     pub fn new(event_bus: Arc<EventBus>) -> Self {
         Self {
-            agents: Arc::new(DashMap::new()),
+            agents: DashMap::new(),
             event_bus,
-            default_restart_policy: RestartPolicy::default(),
-        }
-    }
-
-    /// Create a new agent manager with a custom restart policy.
-    pub fn with_restart_policy(event_bus: Arc<EventBus>, policy: RestartPolicy) -> Self {
-        Self {
-            agents: Arc::new(DashMap::new()),
-            event_bus,
-            default_restart_policy: policy,
         }
     }
 
@@ -89,44 +65,35 @@ impl AgentManager {
         session_id: SessionId,
         name: &str,
         provider: &str,
-        model: &str,
+        _model: &str,
         cwd: PathBuf,
-    ) -> Result<(), AcpError> {
+    ) -> Result<(), String> {
         info!(
             session_id = %session_id,
             name = %name,
             provider = %provider,
-            model = %model,
             cwd = %cwd.display(),
             "creating agent"
         );
 
-        let mut client = AcpClient::new(
-            session_id.clone(),
-            provider.to_string(),
-            model.to_string(),
-            cwd,
-        );
-
-        let agent_binary = resolve_binary(provider);
+        let kind = parse_agent_kind(provider);
+        let mut backend = AcpBackend::new(kind.clone());
         let created_at = Utc::now();
 
-        // Attempt to start the agent. On failure, register it as crashed
-        // so the session is still visible in the list.
-        match client.start(&agent_binary).await {
+        // Attempt to start the backend. On failure, register in crashed state.
+        match backend.start(&cwd, None).await {
             Ok(()) => {
-                // Take the event receiver and start routing events
-                if let Some(event_rx) = client.take_event_rx() {
-                    self.start_event_router(session_id.clone(), event_rx);
-                }
+                // Start event router that bridges backend events to the event bus.
+                self.start_event_router(session_id.clone(), &backend);
 
                 let managed = ManagedAgent {
-                    client,
+                    backend,
                     name: name.to_string(),
+                    kind,
+                    cwd,
                     created_at,
-                    agent_binary,
                     restart_count: 0,
-                    restart_policy: self.default_restart_policy.clone(),
+                    companion_terminal_id: None,
                 };
 
                 self.agents.insert(session_id.clone(), managed);
@@ -146,19 +113,14 @@ impl AgentManager {
                     "agent failed to start, registering in crashed state"
                 );
 
-                // Mark client as crashed
-                client.status = AgentStatus::Crashed {
-                    error: e.to_string(),
-                    class: ErrorClass::Permanent,
-                };
-
                 let managed = ManagedAgent {
-                    client,
+                    backend,
                     name: name.to_string(),
+                    kind,
+                    cwd,
                     created_at,
-                    agent_binary,
                     restart_count: 0,
-                    restart_policy: self.default_restart_policy.clone(),
+                    companion_terminal_id: None,
                 };
 
                 self.agents.insert(session_id.clone(), managed);
@@ -166,7 +128,7 @@ impl AgentManager {
                 self.event_bus.publish_control(ControlEvent::AgentStatusChanged {
                     session_id: session_id.clone(),
                     status: AgentStatus::Crashed {
-                        error: e.to_string(),
+                        error: e.clone(),
                         class: ErrorClass::Permanent,
                     },
                 });
@@ -176,59 +138,32 @@ impl AgentManager {
         }
     }
 
-    /// Send a message to an agent.
+    /// Send a message to an agent (fire-and-forget).
+    ///
+    /// The caller uses the event stream to detect when the turn finishes.
     pub async fn send_message(
         &self,
         session_id: &str,
         text: String,
-    ) -> Result<(), AcpError> {
+    ) -> Result<(), String> {
         let agent = self
             .agents
             .get(session_id)
-            .ok_or(AcpError::NotRunning)?;
+            .ok_or_else(|| "Agent not running".to_string())?;
 
-        agent.client.send_message(text).await
-    }
-
-    /// Approve a tool use request.
-    pub async fn approve_tool(
-        &self,
-        session_id: &str,
-        tool_id: String,
-    ) -> Result<(), AcpError> {
-        let agent = self
-            .agents
-            .get(session_id)
-            .ok_or(AcpError::NotRunning)?;
-
-        agent.client.approve_tool(tool_id).await
-    }
-
-    /// Deny a tool use request.
-    pub async fn deny_tool(
-        &self,
-        session_id: &str,
-        tool_id: String,
-        reason: Option<String>,
-    ) -> Result<(), AcpError> {
-        let agent = self
-            .agents
-            .get(session_id)
-            .ok_or(AcpError::NotRunning)?;
-
-        agent.client.deny_tool(tool_id, reason).await
+        agent.backend.send_message_fire(&text).await
     }
 
     /// Kill an agent session.
-    pub async fn kill_agent(&self, session_id: &str) -> Result<(), AcpError> {
+    pub async fn kill_agent(&self, session_id: &str) -> Result<(), String> {
         if let Some(mut entry) = self.agents.get_mut(session_id) {
-            entry.value_mut().client.kill().await;
+            entry.value_mut().backend.shutdown().await;
             drop(entry);
             self.agents.remove(session_id);
             info!(session_id = %session_id, "agent killed");
             Ok(())
         } else {
-            Err(AcpError::NotRunning)
+            Err("Agent not running".to_string())
         }
     }
 
@@ -241,7 +176,7 @@ impl AgentManager {
                 (
                     entry.key().clone(),
                     m.name.clone(),
-                    m.client.status.clone(),
+                    AgentStatus::Ready, // Simplified: actual status tracked via events
                     m.created_at,
                 )
             })
@@ -258,121 +193,53 @@ impl AgentManager {
         self.agents.len()
     }
 
-    /// Start routing events from an agent's event channel to the EventBus.
-    fn start_event_router(
-        &self,
-        session_id: SessionId,
-        mut event_rx: mpsc::Receiver<AcpEvent>,
-    ) {
-        let event_bus = Arc::clone(&self.event_bus);
-        let agents = Arc::clone(&self.agents);
+    /// Start routing events from the AcpBackend's broadcast channel to the EventBus.
+    fn start_event_router(&self, session_id: String, backend: &AcpBackend) {
+        let mut rx = backend.subscribe();
+        let event_bus = self.event_bus.clone();
         let sid = session_id.clone();
+        let mut seq: u64 = 1;
 
         tokio::spawn(async move {
-            let mut seq: u64 = 1;
-
-            while let Some(event) = event_rx.recv().await {
-                match event {
-                    AcpEvent::StatusChanged(status) => {
-                        event_bus.publish_control(ControlEvent::AgentStatusChanged {
-                            session_id: sid.clone(),
-                            status,
-                        });
+            while let Ok(event) = rx.recv().await {
+                let data_event = match event {
+                    AgentEvent::Text(content) => DataEvent::AgentText {
+                        seq,
+                        content,
+                        streaming: true,
+                    },
+                    AgentEvent::Thinking(content) => DataEvent::AgentThinking { seq, content },
+                    AgentEvent::ToolUse { name, id, input } => DataEvent::AgentToolUse {
+                        seq,
+                        id,
+                        name,
+                        input: serde_json::Value::String(input.unwrap_or_default()),
+                    },
+                    AgentEvent::ToolResult {
+                        id,
+                        output,
+                        is_error,
+                    } => DataEvent::AgentToolResult {
+                        seq,
+                        id,
+                        output: output.unwrap_or_default(),
+                        is_error,
+                    },
+                    AgentEvent::Progress(message) => DataEvent::AgentProgress { seq, message },
+                    AgentEvent::TurnComplete { cost_usd, .. } => {
+                        DataEvent::AgentTurnComplete { seq, cost_usd }
                     }
-                    AcpEvent::Content(content) => {
-                        let data_event = DataEvent::AgentMessage {
-                            seq,
-                            content,
-                        };
-                        seq += 1;
-                        event_bus.publish_data(&sid, data_event).await;
-                    }
-                    AcpEvent::ToolUseRequest { id: _, tool, input } => {
-                        let data_event = DataEvent::AgentToolUse {
-                            seq,
-                            tool,
-                            input,
-                        };
-                        seq += 1;
-                        event_bus.publish_data(&sid, data_event).await;
-                    }
-                    AcpEvent::Error { message, class } => {
-                        error!(
-                            session_id = %sid,
-                            error = %message,
-                            class = ?class,
-                            "agent error"
-                        );
-                        event_bus.publish_control(ControlEvent::AgentError {
-                            session_id: sid.clone(),
-                            error: message.clone(),
-                            class: class.clone(),
-                        });
-
-                        // Handle restart for transient errors
-                        if matches!(class, ErrorClass::Transient) {
-                            Self::maybe_restart(&agents, &event_bus, &sid).await;
-                        }
-                    }
-                    AcpEvent::Exited(code) => {
-                        warn!(
-                            session_id = %sid,
-                            exit_code = ?code,
-                            "agent process exited"
-                        );
-                        Self::maybe_restart(&agents, &event_bus, &sid).await;
-                        break;
-                    }
-                }
+                    AgentEvent::Error(message) => DataEvent::AgentError {
+                        seq,
+                        message,
+                        severity: ErrorClass::Transient,
+                        guidance: String::new(),
+                    },
+                };
+                seq += 1;
+                event_bus.publish_data(&sid, data_event).await;
             }
         });
-    }
-
-    /// Attempt to restart a crashed agent with backoff.
-    async fn maybe_restart(
-        agents: &Arc<DashMap<SessionId, ManagedAgent>>,
-        event_bus: &EventBus,
-        session_id: &str,
-    ) {
-        let should_restart = if let Some(mut entry) = agents.get_mut(session_id) {
-            let managed = entry.value_mut();
-            managed.restart_count += 1;
-
-            if managed.restart_count > managed.restart_policy.max_attempts {
-                error!(
-                    session_id = %session_id,
-                    attempts = managed.restart_count,
-                    "agent exceeded max restart attempts, not restarting"
-                );
-                event_bus.publish_control(ControlEvent::AgentError {
-                    session_id: session_id.to_string(),
-                    error: "exceeded max restart attempts".to_string(),
-                    class: ErrorClass::Permanent,
-                });
-                false
-            } else {
-                let backoff = std::cmp::min(
-                    managed.restart_policy.backoff_base_secs
-                        * 2u64.pow(managed.restart_count - 1),
-                    managed.restart_policy.backoff_max_secs,
-                );
-                info!(
-                    session_id = %session_id,
-                    attempt = managed.restart_count,
-                    backoff_secs = backoff,
-                    "scheduling agent restart"
-                );
-                // In a real implementation, we'd use tokio::time::sleep(backoff)
-                // then call client.start() again. For now, we just log.
-                true
-            }
-        } else {
-            false
-        };
-
-        if should_restart {
-            debug!(session_id = %session_id, "agent restart scheduled");
-        }
     }
 
     /// Shut down all agents.
@@ -380,7 +247,7 @@ impl AgentManager {
         let keys: Vec<SessionId> = self.agents.iter().map(|e| e.key().clone()).collect();
         for session_id in keys {
             if let Some(mut entry) = self.agents.get_mut(&session_id) {
-                entry.value_mut().client.kill().await;
+                entry.value_mut().backend.shutdown().await;
             }
             self.agents.remove(&session_id);
         }
@@ -388,16 +255,14 @@ impl AgentManager {
     }
 }
 
-/// Resolve an agent binary path from a provider name.
-///
-/// Maps well-known provider names to their CLI binary names.
-/// Falls back to using the provider name directly.
-fn resolve_binary(provider: &str) -> String {
+/// Parse a provider string into an AgentKind.
+fn parse_agent_kind(provider: &str) -> AgentKind {
     match provider {
-        "claude-code" => "claude".to_string(),
-        "gemini-cli" => "gemini".to_string(),
-        "aider" => "aider".to_string(),
-        "codex" => "codex".to_string(),
-        other => other.to_string(),
+        "claude" | "claude-code" => AgentKind::Claude,
+        "gemini" | "gemini-cli" => AgentKind::Gemini,
+        "opencode" => AgentKind::OpenCode,
+        "codex" => AgentKind::Codex,
+        // Default to Claude for unknown providers
+        _ => AgentKind::Claude,
     }
 }

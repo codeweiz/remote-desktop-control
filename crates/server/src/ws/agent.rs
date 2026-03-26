@@ -1,8 +1,8 @@
 //! WebSocket handler for agent (ACP) sessions.
 //!
 //! Bridges the browser client to an ACP agent subprocess via the AgentManager.
-//! Client sends JSON commands (message, approve, deny); server forwards
-//! DataEvents (AgentMessage, AgentToolUse) as JSON to the client.
+//! Client sends JSON commands (message); server forwards
+//! DataEvents (AgentText, AgentToolUse, etc.) as JSON to the client.
 
 use axum::{
     extract::{
@@ -35,15 +35,6 @@ enum AgentClientCommand {
     /// Send a user message to the agent.
     #[serde(rename = "message")]
     Message { text: String },
-    /// Approve a pending tool use request.
-    #[serde(rename = "approve")]
-    Approve { tool_id: String },
-    /// Deny a pending tool use request.
-    #[serde(rename = "deny")]
-    Deny {
-        tool_id: String,
-        reason: Option<String>,
-    },
 }
 
 /// Agent WebSocket upgrade handler.
@@ -132,34 +123,6 @@ async fn handle_agent(
                                     }
                                 }
                             }
-                            Ok(AgentClientCommand::Approve { tool_id }) => {
-                                debug!(session_id = %session_id, tool_id = %tool_id, "approve tool use");
-                                match state.core.agent_manager.approve_tool(&session_id, tool_id).await {
-                                    Ok(()) => {}
-                                    Err(e) => {
-                                        error!(session_id = %session_id, error = %e, "failed to approve tool");
-                                        let err_msg = serde_json::json!({
-                                            "type": "error",
-                                            "error": e.to_string(),
-                                        });
-                                        let _ = ws_tx.send(Message::Text(err_msg.to_string().into())).await;
-                                    }
-                                }
-                            }
-                            Ok(AgentClientCommand::Deny { tool_id, reason }) => {
-                                debug!(session_id = %session_id, tool_id = %tool_id, "deny tool use");
-                                match state.core.agent_manager.deny_tool(&session_id, tool_id, reason).await {
-                                    Ok(()) => {}
-                                    Err(e) => {
-                                        error!(session_id = %session_id, error = %e, "failed to deny tool");
-                                        let err_msg = serde_json::json!({
-                                            "type": "error",
-                                            "error": e.to_string(),
-                                        });
-                                        let _ = ws_tx.send(Message::Text(err_msg.to_string().into())).await;
-                                    }
-                                }
-                            }
                             Err(e) => {
                                 warn!(session_id = %session_id, error = %e, text = %text, "unknown agent client command");
                             }
@@ -189,26 +152,86 @@ async fn handle_agent(
             // Outgoing data event from the agent
             event = data_rx.recv() => {
                 match event {
-                    Some(DataEvent::AgentMessage { seq, content }) => {
+                    Some(DataEvent::AgentText { seq, content, streaming }) => {
                         let msg = serde_json::json!({
-                            "type": "agent_message",
+                            "type": "agent_text",
+                            "seq": seq,
+                            "content": content,
+                            "streaming": streaming,
+                        });
+                        if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
+                            debug!(session_id = %session_id, "failed to send agent text, closing");
+                            break;
+                        }
+                    }
+                    Some(DataEvent::AgentThinking { seq, content }) => {
+                        let msg = serde_json::json!({
+                            "type": "agent_thinking",
                             "seq": seq,
                             "content": content,
                         });
                         if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
-                            debug!(session_id = %session_id, "failed to send agent message, closing");
+                            debug!(session_id = %session_id, "failed to send agent thinking, closing");
                             break;
                         }
                     }
-                    Some(DataEvent::AgentToolUse { seq, tool, input }) => {
+                    Some(DataEvent::AgentToolUse { seq, id, name, input }) => {
                         let msg = serde_json::json!({
                             "type": "tool_use",
                             "seq": seq,
-                            "tool": tool,
+                            "id": id,
+                            "name": name,
                             "input": input,
                         });
                         if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
                             debug!(session_id = %session_id, "failed to send tool_use, closing");
+                            break;
+                        }
+                    }
+                    Some(DataEvent::AgentToolResult { seq, id, output, is_error }) => {
+                        let msg = serde_json::json!({
+                            "type": "tool_result",
+                            "seq": seq,
+                            "id": id,
+                            "output": output,
+                            "is_error": is_error,
+                        });
+                        if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
+                            debug!(session_id = %session_id, "failed to send tool_result, closing");
+                            break;
+                        }
+                    }
+                    Some(DataEvent::AgentProgress { seq, message }) => {
+                        let msg = serde_json::json!({
+                            "type": "agent_progress",
+                            "seq": seq,
+                            "message": message,
+                        });
+                        if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
+                            debug!(session_id = %session_id, "failed to send agent_progress, closing");
+                            break;
+                        }
+                    }
+                    Some(DataEvent::AgentTurnComplete { seq, cost_usd }) => {
+                        let msg = serde_json::json!({
+                            "type": "turn_complete",
+                            "seq": seq,
+                            "cost_usd": cost_usd,
+                        });
+                        if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
+                            debug!(session_id = %session_id, "failed to send turn_complete, closing");
+                            break;
+                        }
+                    }
+                    Some(DataEvent::AgentError { seq, message, severity: _, guidance }) => {
+                        let msg = serde_json::json!({
+                            "type": "agent_error",
+                            "seq": seq,
+                            "message": message,
+                            "guidance": guidance,
+                        });
+                        if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
+                            debug!(session_id = %session_id, "failed to send agent_error, closing");
                             break;
                         }
                     }

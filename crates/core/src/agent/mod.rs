@@ -3,6 +3,10 @@
 //! Provides subprocess-based communication with AI agent binaries using
 //! JSON-RPC over stdin/stdout, agent lifecycle management, and session routing.
 
-pub mod acp_client;
+pub mod acp_backend;
+pub mod claude_bridge;
+pub mod claude_sdk;
+pub mod error_classify;
+pub mod event;
 pub mod manager;
-pub mod types;
+pub mod native_acp;
