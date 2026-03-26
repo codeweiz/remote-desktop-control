@@ -68,7 +68,8 @@ cargo build --release -p rtb-cli
 或使用 Makefile:
 
 ```bash
-make build    # 构建前端 + 发布版二进制
+make dev      # 开发模式启动（自动编译插件）
+make build    # 构建前端 + 插件 + 发布版二进制
 make install  # 构建并安装到 /usr/local/bin/rtb
 ```
 
@@ -79,10 +80,47 @@ rtb                  # 启动 RTB 服务器 (前台运行)
 rtb start -d         # 以守护进程方式启动
 rtb stop             # 停止守护进程
 rtb status           # 查看服务器状态
-
-rtb session list     # 列出活跃的终端会话
-rtb session new      # 创建新的终端会话
 ```
+
+## 插件
+
+### Cloudflare Tunnel
+
+启动时自动通过 `cloudflared` 创建公网 URL（Quick Tunnel 模式，无需 Cloudflare 账号）。
+
+```bash
+brew install cloudflared   # 安装一次即可
+make dev                   # Tunnel 随服务自动启动
+```
+
+### 飞书 IM
+
+通过 WebSocket 长连接接收飞书消息，无需公网域名。配置凭证：
+
+```bash
+export FEISHU_APP_ID="your_app_id"
+export FEISHU_APP_SECRET="your_app_secret"
+make dev
+```
+
+飞书开放平台配置：
+1. 创建企业自建应用
+2. 事件订阅 → 订阅方式选择「使用长连接接收事件」
+3. 添加事件：`im.message.receive_v1`
+
+### IM 交互命令
+
+在飞书中给机器人发消息即可与 AI Agent 交互：
+
+| 命令 | 说明 |
+|------|------|
+| *(任意文本)* | 与当前 Agent 对话（无 Agent 时自动创建） |
+| `/new [provider]` | 创建新 Agent（默认 `claude-code`） |
+| `/list` | 列出所有 Agent（带序号） |
+| `/switch N` | 切换到第 N 个 Agent |
+| `/help` | 显示帮助信息 |
+
+Agent 的输出（文本、工具调用、进度、错误）会自动转发到飞书聊天中。
 
 ## 技术栈
 
@@ -104,11 +142,9 @@ cargo run -p rtb-cli
 cd web && npm run dev
 ```
 
-其他命令:
-
 ```bash
-make test    # 运行所有测试 (Rust + 前端)
-make lint    # 运行代码格式检查 + clippy
+make help    # 查看所有可用目标
+make test    # 运行所有测试
 make clean   # 清理构建产物
 ```
 

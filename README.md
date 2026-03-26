@@ -68,7 +68,8 @@ Then open your browser at `http://localhost:9399`.
 Or use the Makefile:
 
 ```bash
-make build    # Build frontend + release binary
+make dev      # Start in dev mode (builds plugins automatically)
+make build    # Build frontend + plugins + release binary
 make install  # Build and install to /usr/local/bin/rtb
 ```
 
@@ -79,10 +80,47 @@ rtb                  # Start the RTB server (foreground)
 rtb start -d         # Start as background daemon
 rtb stop             # Stop the daemon
 rtb status           # Show server status
-
-rtb session list     # List active terminal sessions
-rtb session new      # Create a new terminal session
 ```
+
+## Plugins
+
+### Cloudflare Tunnel
+
+Automatically creates a public URL via `cloudflared` quick tunnel on startup. No Cloudflare account needed.
+
+```bash
+brew install cloudflared   # Install once
+make dev                   # Tunnel starts automatically
+```
+
+### Feishu (Lark) IM
+
+Connects to Feishu via WebSocket long connection to receive and send messages. Configure credentials:
+
+```bash
+export FEISHU_APP_ID="your_app_id"
+export FEISHU_APP_SECRET="your_app_secret"
+make dev
+```
+
+Feishu Open Platform setup:
+1. Create an enterprise app
+2. Event subscription -> select "Use long connection to receive events"
+3. Add event: `im.message.receive_v1`
+
+### IM Commands
+
+Send messages to the Feishu bot to interact with AI agents:
+
+| Command | Description |
+|---------|-------------|
+| *(any text)* | Chat with the current agent (auto-creates one if none) |
+| `/new [provider]` | Create a new agent (default: `claude-code`) |
+| `/list` | List all agents with numbered index |
+| `/switch N` | Switch to agent #N |
+| `/help` | Show available commands |
+
+Agent output (text, tool use, progress, errors) is automatically forwarded to the Feishu chat.
 
 ## Tech Stack
 
@@ -104,11 +142,9 @@ cargo run -p rtb-cli
 cd web && npm run dev
 ```
 
-Additional commands:
-
 ```bash
-make test    # Run all tests (Rust + frontend)
-make lint    # Run cargo fmt check + clippy
+make help    # Show all available targets
+make test    # Run all tests
 make clean   # Remove build artifacts
 ```
 
