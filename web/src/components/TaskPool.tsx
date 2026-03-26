@@ -7,7 +7,6 @@ import {
   Collapse,
   TextField,
   Button,
-  Divider,
 } from '@mui/material'
 import {
   ExpandMore as ExpandMoreIcon,
@@ -18,6 +17,7 @@ import {
   Delete as DeleteIcon,
   Checklist as TaskListIcon,
   Refresh as RefreshIcon,
+  SmartToy as BotIcon,
 } from '@mui/icons-material'
 import type { Task, TaskPriority, TaskStatus } from '../lib/types'
 import { useTaskPool } from '../hooks/useTaskPool'
@@ -35,9 +35,9 @@ function statusColor(status: TaskStatus): string {
   switch (status) {
     case 'Pending': return '#94a3b8'
     case 'InProgress': return '#3b82f6'
-    case 'NeedsReview': return '#fbbf24'
+    case 'NeedsReview': return '#f59e0b'
     case 'Completed': return '#34d399'
-    case 'Cancelled': return '#64748b'
+    case 'Cancelled': return '#ef4444'
   }
 }
 
@@ -94,20 +94,37 @@ function TaskItem({
             {task.title}
           </Typography>
         </Box>
-        <Chip
-          size="small"
-          label={task.status}
-          sx={{
-            mt: 0.25,
-            height: 16,
-            fontSize: 9,
-            fontFamily: "'JetBrains Mono', monospace",
-            bgcolor: `${sColor}20`,
-            color: sColor,
-            '& .MuiChip-label': { px: 0.5 },
-            textDecoration: task.status === 'Cancelled' ? 'line-through' : 'none',
-          }}
-        />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.25 }}>
+          <Chip
+            size="small"
+            label={task.status}
+            sx={{
+              height: 16,
+              fontSize: 9,
+              fontFamily: "'JetBrains Mono', monospace",
+              bgcolor: `${sColor}20`,
+              color: sColor,
+              '& .MuiChip-label': { px: 0.5 },
+              textDecoration: task.status === 'Cancelled' ? 'line-through' : 'none',
+            }}
+          />
+          {task.session_id && (
+            <Chip
+              size="small"
+              icon={<BotIcon sx={{ fontSize: 9 }} />}
+              label={task.session_id.slice(0, 6)}
+              sx={{
+                height: 16,
+                fontSize: 8,
+                fontFamily: "'JetBrains Mono', monospace",
+                bgcolor: 'rgba(139,92,246,0.12)',
+                color: '#a78bfa',
+                '& .MuiChip-label': { px: 0.5 },
+                '& .MuiChip-icon': { ml: 0.25, fontSize: 9, color: '#a78bfa' },
+              }}
+            />
+          )}
+        </Box>
       </Box>
       <Box
         className="task-actions"

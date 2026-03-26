@@ -85,6 +85,7 @@ export async function createSession(req: SessionCreateRequest = {}): Promise<Ses
     shell: req.shell || null,
     cols: 80,
     rows: 24,
+    provider: req.kind === 'agent' ? (req.provider || 'claude-code') : undefined,
   }
 }
 
