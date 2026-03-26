@@ -3,12 +3,28 @@ use std::time::Duration;
 
 use rtb_core::pty::manager::PtyManager;
 
+/// Skip tests if tmux is not installed (CI environments, etc.)
+fn require_tmux() {
+    if std::process::Command::new("tmux")
+        .arg("-V")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| !s.success())
+        .unwrap_or(true)
+    {
+        eprintln!("SKIP: tmux not found, skipping PTY tests");
+        std::process::exit(0);
+    }
+}
+
 // ---------------------------------------------------------------------------
-// PTY session tests (tmux-backed)
+// PTY session tests (tmux-backed) — require tmux installed
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_create_pty_session() {
+    require_tmux();
     let event_bus = Arc::new(rtb_core::event_bus::EventBus::new());
     let config = Arc::new(rtb_core::config::Config::default());
     let manager = PtyManager::new(event_bus, config);
@@ -33,6 +49,7 @@ async fn test_create_pty_session() {
 
 #[tokio::test]
 async fn test_pty_output() {
+    require_tmux();
     let event_bus = Arc::new(rtb_core::event_bus::EventBus::new());
     let config = Arc::new(rtb_core::config::Config::default());
     let manager = PtyManager::new(event_bus.clone(), config);
@@ -86,6 +103,7 @@ async fn test_pty_output() {
 
 #[tokio::test]
 async fn test_pty_manager_crud() {
+    require_tmux();
     let event_bus = Arc::new(rtb_core::event_bus::EventBus::new());
     let config = Arc::new(rtb_core::config::Config::default());
     let manager = PtyManager::new(event_bus, config);
@@ -138,6 +156,7 @@ async fn test_pty_manager_crud() {
 
 #[tokio::test]
 async fn test_pty_resize() {
+    require_tmux();
     let event_bus = Arc::new(rtb_core::event_bus::EventBus::new());
     let config = Arc::new(rtb_core::config::Config::default());
     let manager = PtyManager::new(event_bus, config);
