@@ -9,6 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
+use rtb_core::pty::session::PtyStatus;
 
 // ---------------------------------------------------------------------------
 // Request / response types
@@ -40,15 +41,14 @@ pub struct CreateSessionResponse {
 pub struct SessionInfo {
     pub id: String,
     pub name: String,
+    pub kind: String,
     pub status: String,
+    pub parent_id: Option<String>,
     pub created_at: String,
-    pub shell: String,
-    pub cwd: String,
-}
-
-#[derive(Serialize)]
-pub struct DeleteSessionResponse {
-    pub deleted: bool,
+    pub exit_code: Option<i32>,
+    pub shell: Option<String>,
+    pub cols: u16,
+    pub rows: u16,
 }
 
 #[derive(Serialize)]
@@ -66,14 +66,21 @@ pub async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
     let list: Vec<SessionInfo> = sessions
         .into_iter()
         .map(|s| {
-            let status = format!("{:?}", s.status);
+            let (status, exit_code) = match s.status {
+                PtyStatus::Running => ("running".to_string(), None),
+                PtyStatus::Exited(code) => ("exited".to_string(), Some(code)),
+            };
             SessionInfo {
                 id: s.id,
                 name: s.name,
+                kind: "terminal".to_string(),
                 status,
+                parent_id: None,
                 created_at: s.created_at.to_rfc3339(),
-                shell: s.shell,
-                cwd: s.cwd.display().to_string(),
+                exit_code,
+                shell: Some(s.shell),
+                cols: 80,
+                rows: 24,
             }
         })
         .collect();
@@ -116,11 +123,7 @@ pub async fn delete_session(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.core.pty_manager.kill_session(&id).await {
-        Ok(()) => (
-            StatusCode::OK,
-            Json(DeleteSessionResponse { deleted: true }),
-        )
-            .into_response(),
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("not found") {

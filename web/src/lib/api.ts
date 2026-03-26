@@ -1,4 +1,4 @@
-import type { Session, SessionCreateRequest, ServerStatus } from './types'
+import type { Session, SessionKind, SessionCreateRequest, ServerStatus } from './types'
 
 /** Extract and store auth token from URL or localStorage */
 function initToken(): string | null {
@@ -54,30 +54,48 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 
 /** List all sessions */
 export async function getSessions(): Promise<Session[]> {
-  return apiFetch<Session[]>('/api/sessions')
+  return apiFetch<Session[]>('/api/v1/sessions')
 }
 
 /** Create a new session */
 export async function createSession(req: SessionCreateRequest = {}): Promise<Session> {
-  return apiFetch<Session>('/api/sessions', {
+  const body = {
+    name: req.name || `session-${Date.now()}`,
+    type: req.kind || 'terminal',
+    shell: req.shell,
+  }
+  const result = await apiFetch<{ id: string }>('/api/v1/sessions', {
     method: 'POST',
-    body: JSON.stringify(req),
+    body: JSON.stringify(body),
   })
+  // Server only returns { id }, so construct a minimal Session object
+  return {
+    id: result.id,
+    name: body.name,
+    kind: (req.kind || 'terminal') as SessionKind,
+    status: 'running',
+    parent_id: null,
+    created_at: new Date().toISOString(),
+    exit_code: null,
+    shell: req.shell || null,
+    cols: 80,
+    rows: 24,
+  }
 }
 
 /** Get a single session */
 export async function getSession(id: string): Promise<Session> {
-  return apiFetch<Session>(`/api/sessions/${id}`)
+  return apiFetch<Session>(`/api/v1/sessions/${id}`)
 }
 
 /** Delete a session */
 export async function deleteSession(id: string): Promise<void> {
-  return apiFetch<void>(`/api/sessions/${id}`, {
+  return apiFetch<void>(`/api/v1/sessions/${id}`, {
     method: 'DELETE',
   })
 }
 
 /** Get server status */
 export async function getStatus(): Promise<ServerStatus> {
-  return apiFetch<ServerStatus>('/api/status')
+  return apiFetch<ServerStatus>('/api/v1/status')
 }

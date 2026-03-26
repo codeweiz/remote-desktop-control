@@ -71,8 +71,17 @@ async fn handle_status(socket: WebSocket, state: AppState) {
                         debug!("status WebSocket closed by client");
                         break;
                     }
+                    Some(Ok(Message::Text(text))) => {
+                        // Handle application-level ping from frontend
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if v.get("type").and_then(|t| t.as_str()) == Some("ping") {
+                                let pong = serde_json::json!({ "type": "pong" });
+                                let _ = ws_tx.send(Message::Text(pong.to_string().into())).await;
+                            }
+                        }
+                    }
                     Some(Ok(_)) => {
-                        // Ignore any text/binary from client on status channel
+                        // Ignore other binary messages from client on status channel
                     }
                     Some(Err(e)) => {
                         warn!(error = %e, "status WebSocket error");

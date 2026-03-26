@@ -116,7 +116,7 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
     resizeObserver.observe(container)
 
     // Connect WebSocket for terminal I/O
-    const url = getWsUrl(`/ws/terminal/${sessionId}`)
+    const url = getWsUrl('/ws/terminal?session=' + sessionId)
     setConnectionState('connecting')
     const ws = new WebSocket(url)
     wsRef.current = ws
@@ -160,14 +160,11 @@ export function useTerminal({ sessionId, fontSize = 14 }: UseTerminalOptions): U
       setConnectionState('disconnected')
     }
 
-    // Terminal input -> WebSocket
+    // Terminal input -> WebSocket (send as binary for raw PTY input)
     const inputDisposable = terminal.onData((data: string) => {
       if (ws.readyState === WebSocket.OPEN) {
-        // Base64 encode input
-        ws.send(JSON.stringify({
-          type: 'input',
-          data: btoa(data),
-        }))
+        const encoder = new TextEncoder()
+        ws.send(encoder.encode(data))
       }
     })
 
