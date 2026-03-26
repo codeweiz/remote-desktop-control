@@ -9,6 +9,7 @@ members = [
 ]
 exclude = [
     "plugins/feishu-plugin",
+    "plugins/cloudflare-tunnel",
 ]
 
 [workspace.package]

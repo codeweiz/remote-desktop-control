@@ -1,0 +1,11 @@
+[plugin]
+id = "cloudflare-tunnel"
+name = "Cloudflare Tunnel Plugin"
+version = "0.1.0"
+type = "tunnel"
+executable = "cloudflare-tunnel"
+description = "Cloudflare Tunnel (cloudflared) integration for RTB"
+
+[config]
+# cloudflared binary path (auto-detected if in PATH)
+# binary = "/usr/local/bin/cloudflared"
