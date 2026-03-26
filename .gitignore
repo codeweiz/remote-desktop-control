@@ -28,4 +28,6 @@ Thumbs.db
 .env.local
 plugins/feishu-plugin/target/
 plugins/feishu-plugin/Cargo.lock
+plugins/cloudflare-tunnel/target/
+plugins/cloudflare-tunnel/Cargo.lock
 design-system/
