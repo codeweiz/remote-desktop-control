@@ -11,8 +11,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-use rtb_core::event_bus::EventBus;
 use rtb_core::events::ControlEvent;
+use rtb_core::CoreState;
 
 use crate::im::ImBridge;
 use crate::plugin::{PluginProcess, PluginProcessError};
@@ -53,8 +53,8 @@ pub struct PluginManager {
     plugins_dir: PathBuf,
     /// All managed plugins keyed by plugin ID.
     plugins: Arc<RwLock<HashMap<String, ManagedPlugin>>>,
-    /// Event bus for publishing control events.
-    event_bus: Arc<EventBus>,
+    /// Core state (contains event_bus, agent_manager, etc.).
+    core: Arc<CoreState>,
     /// JSON-RPC timeout in seconds.
     timeout_secs: u64,
     /// The local server port that tunnel plugins should forward traffic to.
@@ -63,11 +63,11 @@ pub struct PluginManager {
 
 impl PluginManager {
     /// Create a new plugin manager.
-    pub fn new(plugins_dir: PathBuf, event_bus: Arc<EventBus>, timeout_secs: u64, server_port: u16) -> Self {
+    pub fn new(plugins_dir: PathBuf, core: Arc<CoreState>, timeout_secs: u64, server_port: u16) -> Self {
         Self {
             plugins_dir,
             plugins: Arc::new(RwLock::new(HashMap::new())),
-            event_bus,
+            core,
             timeout_secs,
             server_port,
         }
@@ -193,7 +193,7 @@ impl PluginManager {
         let im_bridge = if plugin_type == PluginType::Im {
             let notification_rx = process.take_notification_rx();
             if let Some(rx) = notification_rx {
-                let bridge = ImBridge::new(Arc::clone(&self.event_bus));
+                let bridge = ImBridge::new(Arc::clone(&self.core));
                 bridge.start(rx);
                 // Also listen for NotificationTriggered control events and forward to IM
                 bridge.start_notification_listener();
@@ -208,7 +208,7 @@ impl PluginManager {
         let tunnel_bridge = if plugin_type == PluginType::Tunnel {
             let notification_rx = process.take_notification_rx();
             if let Some(rx) = notification_rx {
-                let bridge = TunnelBridge::new(Arc::clone(&self.event_bus));
+                let bridge = TunnelBridge::new(Arc::clone(&self.core.event_bus));
                 bridge.start(rx);
                 Some(bridge)
             } else {
@@ -285,7 +285,7 @@ impl PluginManager {
                         if let Some(ref result) = resp.result {
                             if let Some(url) = result.get("url").and_then(|v| v.as_str()) {
                                 info!(url = %url, "tunnel URL available");
-                                self.event_bus.publish_control(ControlEvent::TunnelReady {
+                                self.core.event_bus.publish_control(ControlEvent::TunnelReady {
                                     url: url.to_string(),
                                 });
                             }
@@ -334,7 +334,7 @@ impl PluginManager {
         }
 
         // Publish PluginLoaded event
-        self.event_bus.publish_control(ControlEvent::PluginLoaded {
+        self.core.event_bus.publish_control(ControlEvent::PluginLoaded {
             plugin_id: plugin_id.clone(),
             name: plugin_name,
         });
@@ -399,7 +399,7 @@ impl PluginManager {
                         reason: reason.clone(),
                     };
                     error!(plugin_id = %id, reason = %reason, "plugin disabled");
-                    self.event_bus.publish_control(ControlEvent::PluginError {
+                    self.core.event_bus.publish_control(ControlEvent::PluginError {
                         plugin_id: id.clone(),
                         error: reason,
                     });
@@ -420,7 +420,7 @@ impl PluginManager {
                     "scheduling plugin restart"
                 );
 
-                let event_bus = Arc::clone(&self.event_bus);
+                let event_bus = Arc::clone(&self.core.event_bus);
                 let id_clone = id.clone();
                 tokio::spawn(async move {
                     tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs)).await;

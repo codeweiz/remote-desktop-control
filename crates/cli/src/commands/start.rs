@@ -79,7 +79,7 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
     let plugins_dir = PathBuf::from(&config.plugins.dir);
     let plugin_manager = Arc::new(PluginManager::new(
         plugins_dir,
-        Arc::clone(&core.event_bus),
+        Arc::clone(&core),
         config.plugins.jsonrpc_timeout_secs,
         config.server.port,
     ));

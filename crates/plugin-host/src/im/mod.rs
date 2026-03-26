@@ -13,6 +13,7 @@ use tracing::{debug, info, warn};
 
 use rtb_core::event_bus::EventBus;
 use rtb_core::events::{ControlEvent, DataEvent, SessionType};
+use rtb_core::CoreState;
 
 use crate::protocol::JsonRpcNotification;
 use crate::types::{im_methods, ImOnMessageParams, ImOnStatusParams, ImConnectionStatus};
@@ -75,25 +76,15 @@ fn strip_ansi(input: &str) -> String {
 /// A parsed IM command from a user message.
 #[derive(Debug, Clone)]
 pub enum ImCommand {
-    /// `/sessions` — list active sessions
-    ListSessions,
-    /// `/task add <description>` — add a task
-    TaskAdd { description: String },
-    /// `/task list` — list tasks
-    TaskList,
-    /// `/attach <session_id>` — attach IM channel to a session
-    Attach { session_id: String },
-    /// `/detach` — detach IM channel from current session
-    Detach,
-    /// `/agent create <provider>` — create an agent session
-    AgentCreate { provider: String },
-    /// `/agent list` — list agent sessions
-    AgentList,
-    /// `/agent chat <session_id> <message>` — send message to agent
-    AgentChat { session_id: String, message: String },
-    /// `/help` — show available commands
+    /// `/new [provider]` — create new agent, auto-attach
+    NewAgent { provider: String },
+    /// `/list` — list agents with numbered index
+    ListAgents,
+    /// `/switch N` — switch to agent #N
+    Switch { index: usize },
+    /// `/help` — show commands
     Help,
-    /// Not a command, forward as plain text to the attached session
+    /// Plain text — forward to attached agent (auto-create if none)
     PlainText { text: String },
 }
 
@@ -112,71 +103,26 @@ impl ImCommand {
         let cmd = parts[0].to_lowercase();
 
         match cmd.as_str() {
-            "/sessions" => ImCommand::ListSessions,
-            "/task" => {
+            "/new" => {
+                let provider = if parts.len() >= 2 {
+                    parts[1].to_string()
+                } else {
+                    "claude-code".to_string()
+                };
+                ImCommand::NewAgent { provider }
+            }
+            "/list" => ImCommand::ListAgents,
+            "/switch" => {
                 if parts.len() >= 2 {
-                    match parts[1].to_lowercase().as_str() {
-                        "add" => {
-                            let description = if parts.len() >= 3 {
-                                parts[2].to_string()
-                            } else {
-                                String::new()
-                            };
-                            ImCommand::TaskAdd { description }
-                        }
-                        "list" | "ls" => ImCommand::TaskList,
-                        _ => ImCommand::PlainText {
-                            text: trimmed.to_string(),
-                        },
+                    if let Ok(idx) = parts[1].parse::<usize>() {
+                        ImCommand::Switch { index: idx }
+                    } else {
+                        ImCommand::Help
                     }
                 } else {
-                    ImCommand::TaskList
+                    ImCommand::Help
                 }
             }
-            "/attach" => {
-                if parts.len() >= 2 {
-                    ImCommand::Attach {
-                        session_id: parts[1].to_string(),
-                    }
-                } else {
-                    ImCommand::PlainText {
-                        text: trimmed.to_string(),
-                    }
-                }
-            }
-            "/agent" => {
-                if parts.len() >= 2 {
-                    match parts[1].to_lowercase().as_str() {
-                        "create" => {
-                            let provider = if parts.len() >= 3 {
-                                parts[2].to_string()
-                            } else {
-                                "claude-code".to_string()
-                            };
-                            ImCommand::AgentCreate { provider }
-                        }
-                        "list" | "ls" => ImCommand::AgentList,
-                        "chat" => {
-                            // /agent chat SESSION_ID message text...
-                            if parts.len() >= 3 {
-                                let rest = parts[2];
-                                let (session_id, message) =
-                                    rest.split_once(' ').unwrap_or((rest, ""));
-                                ImCommand::AgentChat {
-                                    session_id: session_id.to_string(),
-                                    message: message.to_string(),
-                                }
-                            } else {
-                                ImCommand::Help
-                            }
-                        }
-                        _ => ImCommand::Help,
-                    }
-                } else {
-                    ImCommand::AgentList // default: list agents
-                }
-            }
-            "/detach" => ImCommand::Detach,
             "/help" => ImCommand::Help,
             _ => ImCommand::PlainText {
                 text: trimmed.to_string(),
@@ -202,8 +148,9 @@ struct OutgoingMessage {
 /// - Subscribe to EventBus data events for monitored sessions
 /// - Batch PTY output (5s window), strip ANSI, send to IM plugin via `send_message`
 /// - Track channel_id -> session_id mappings for routing
+/// - Auto-create agent sessions when a user sends a message with no agent attached
 pub struct ImBridge {
-    event_bus: Arc<EventBus>,
+    core: Arc<CoreState>,
     /// Channel-to-session mapping: IM channel -> session ID.
     channel_sessions: Arc<Mutex<HashMap<String, String>>>,
     /// Outgoing message queue for throttled sending.
@@ -216,12 +163,12 @@ pub struct ImBridge {
 
 impl ImBridge {
     /// Create a new IM bridge.
-    pub fn new(event_bus: Arc<EventBus>) -> Self {
-        Self::with_throttle(event_bus, DEFAULT_THROTTLE_MS)
+    pub fn new(core: Arc<CoreState>) -> Self {
+        Self::with_throttle(core, DEFAULT_THROTTLE_MS)
     }
 
     /// Create a new IM bridge with a custom throttle interval.
-    pub fn with_throttle(event_bus: Arc<EventBus>, throttle_ms: u64) -> Self {
+    pub fn with_throttle(core: Arc<CoreState>, throttle_ms: u64) -> Self {
         let plugin_sender: Arc<Mutex<Option<ImPluginSender>>> = Arc::new(Mutex::new(None));
         let (outgoing_tx, outgoing_rx) = mpsc::channel::<OutgoingMessage>(256);
 
@@ -229,7 +176,7 @@ impl ImBridge {
         Self::start_throttle_task(outgoing_rx, throttle_ms, Arc::clone(&plugin_sender));
 
         Self {
-            event_bus,
+            core,
             channel_sessions: Arc::new(Mutex::new(HashMap::new())),
             outgoing_tx,
             _throttle_ms: throttle_ms,
@@ -245,7 +192,7 @@ impl ImBridge {
 
     /// Start processing incoming notifications from the IM plugin.
     pub fn start(&self, mut notification_rx: mpsc::Receiver<JsonRpcNotification>) {
-        let event_bus = Arc::clone(&self.event_bus);
+        let core = Arc::clone(&self.core);
         let channel_sessions = Arc::clone(&self.channel_sessions);
         let outgoing_tx = self.outgoing_tx.clone();
 
@@ -268,7 +215,7 @@ impl ImBridge {
                                     Self::handle_command(
                                         cmd,
                                         msg.channel.clone(),
-                                        &event_bus,
+                                        &core,
                                         &channel_sessions,
                                         &outgoing_tx,
                                     )
@@ -291,7 +238,7 @@ impl ImBridge {
                                         }
                                         ImConnectionStatus::Error
                                         | ImConnectionStatus::Disconnected => {
-                                            event_bus.publish_control(
+                                            core.event_bus.publish_control(
                                                 ControlEvent::PluginError {
                                                     plugin_id: "im".to_string(),
                                                     error: status
@@ -323,21 +270,56 @@ impl ImBridge {
     async fn handle_command(
         cmd: ImCommand,
         channel: Option<String>,
-        _event_bus: &EventBus,
+        core: &CoreState,
         channel_sessions: &Mutex<HashMap<String, String>>,
         outgoing_tx: &mpsc::Sender<OutgoingMessage>,
     ) {
         match cmd {
-            ImCommand::ListSessions => {
-                // Reply with known channel-session mappings for now.
-                let sessions = channel_sessions.lock().await;
-                let reply = if sessions.is_empty() {
-                    "No sessions attached. Use /attach <session_id> to attach.".to_string()
-                } else {
-                    let mut lines = vec!["Attached sessions:".to_string()];
-                    for (ch, sid) in sessions.iter() {
-                        lines.push(format!("  channel={ch} -> session={sid}"));
+            ImCommand::NewAgent { provider } => {
+                let session_id = nanoid::nanoid!(10);
+                let name = format!("IM-Agent-{}", &session_id[..4]);
+                let cwd = std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("/"));
+
+                let reply = match core
+                    .agent_manager
+                    .create_agent(session_id.clone(), &name, &provider, "", cwd)
+                    .await
+                {
+                    Ok(()) => {
+                        if let Some(ch) = channel.as_ref() {
+                            let mut sessions = channel_sessions.lock().await;
+                            sessions.insert(ch.clone(), session_id.clone());
+                        }
+                        format!("Agent created: {name}\nYou can start chatting now.")
                     }
+                    Err(e) => format!("Failed to create agent: {e}"),
+                };
+                let _ = outgoing_tx
+                    .send(OutgoingMessage {
+                        text: reply,
+                        channel,
+                    })
+                    .await;
+            }
+            ImCommand::ListAgents => {
+                let agents = core.agent_manager.list_agents();
+                let current_session = if let Some(ch) = channel.as_ref() {
+                    channel_sessions.lock().await.get(ch).cloned()
+                } else {
+                    None
+                };
+
+                let reply = if agents.is_empty() {
+                    "No agents. Send a message to auto-create one, or use /new".to_string()
+                } else {
+                    let mut lines = vec!["Agents:".to_string()];
+                    for (i, (sid, name, status, _created)) in agents.iter().enumerate() {
+                        let current =
+                            if Some(sid) == current_session.as_ref() { " <-" } else { "" };
+                        lines.push(format!("  #{} {} [{:?}]{}", i + 1, name, status, current));
+                    }
+                    lines.push("\nUse /switch N to switch.".to_string());
                     lines.join("\n")
                 };
                 let _ = outgoing_tx
@@ -347,11 +329,22 @@ impl ImBridge {
                     })
                     .await;
             }
-            ImCommand::TaskAdd { description } => {
-                let reply = if description.is_empty() {
-                    "Usage: /task add <description>".to_string()
+            ImCommand::Switch { index } => {
+                let agents = core.agent_manager.list_agents();
+                let reply = if index == 0 || index > agents.len() {
+                    format!(
+                        "Invalid index. Use /list to see agents (1-{}).",
+                        agents.len()
+                    )
                 } else {
-                    format!("Task queued: {description}")
+                    let (sid, name, _, _) = &agents[index - 1];
+                    if let Some(ch) = channel.as_ref() {
+                        channel_sessions
+                            .lock()
+                            .await
+                            .insert(ch.clone(), sid.clone());
+                    }
+                    format!("Switched to {name}")
                 };
                 let _ = outgoing_tx
                     .send(OutgoingMessage {
@@ -360,121 +353,15 @@ impl ImBridge {
                     })
                     .await;
             }
-            ImCommand::TaskList => {
-                let _ = outgoing_tx
-                    .send(OutgoingMessage {
-                        text: "Task list: (use CLI `rtb task list` for full list)".to_string(),
-                        channel,
-                    })
-                    .await;
-            }
-            ImCommand::Attach { session_id } => {
-                if let Some(ch) = channel.as_ref() {
-                    let mut sessions = channel_sessions.lock().await;
-                    sessions.insert(ch.clone(), session_id.clone());
-                    info!(channel = %ch, session_id = %session_id, "IM channel attached to session");
-                    let _ = outgoing_tx
-                        .send(OutgoingMessage {
-                            text: format!("Attached to session {session_id}. PTY output will be forwarded here."),
-                            channel,
-                        })
-                        .await;
-                } else {
-                    let _ = outgoing_tx
-                        .send(OutgoingMessage {
-                            text: "Cannot attach: no channel ID in this message".to_string(),
-                            channel,
-                        })
-                        .await;
-                }
-            }
-            ImCommand::Detach => {
-                if let Some(ch) = &channel {
-                    let mut sessions = channel_sessions.lock().await;
-                    if sessions.remove(ch).is_some() {
-                        let _ = outgoing_tx
-                            .send(OutgoingMessage {
-                                text: "Detached from session. PTY output will no longer be forwarded.".to_string(),
-                                channel,
-                            })
-                            .await;
-                    } else {
-                        let _ = outgoing_tx
-                            .send(OutgoingMessage {
-                                text: "Not attached to any session.".to_string(),
-                                channel,
-                            })
-                            .await;
-                    }
-                }
-            }
-            ImCommand::AgentCreate { provider } => {
-                let reply = format!(
-                    "Agent session requested (provider: {provider}).\n\
-                     Use the CLI `rtb session create --type agent --provider {provider}` \
-                     to create, then /attach <session_id>."
-                );
-                let _ = outgoing_tx
-                    .send(OutgoingMessage {
-                        text: reply,
-                        channel: channel.clone(),
-                    })
-                    .await;
-            }
-            ImCommand::AgentList => {
-                let reply =
-                    "Agent sessions: use /sessions to see all attached sessions \
-                     (agent + terminal). Full list via CLI: `rtb session list`."
-                        .to_string();
-                let _ = outgoing_tx
-                    .send(OutgoingMessage {
-                        text: reply,
-                        channel: channel.clone(),
-                    })
-                    .await;
-            }
-            ImCommand::AgentChat {
-                session_id,
-                message,
-            } => {
-                if message.is_empty() {
-                    let _ = outgoing_tx
-                        .send(OutgoingMessage {
-                            text: "Usage: /agent chat <session_id> <message>".to_string(),
-                            channel,
-                        })
-                        .await;
-                } else {
-                    debug!(
-                        session_id = %session_id,
-                        message_len = message.len(),
-                        "forwarding agent chat via IM"
-                    );
-                    let reply = format!(
-                        "Message queued for agent session {session_id}. \
-                         Attach with /attach {session_id} to see responses."
-                    );
-                    let _ = outgoing_tx
-                        .send(OutgoingMessage {
-                            text: reply,
-                            channel,
-                        })
-                        .await;
-                }
-            }
             ImCommand::Help => {
                 let help = concat!(
-                    "Available commands:\n",
-                    "  /sessions — list attached sessions\n",
-                    "  /attach <session_id> — attach channel to a session\n",
-                    "  /detach — detach from current session\n",
-                    "  /task add <desc> — queue a new task\n",
-                    "  /task list — list tasks\n",
-                    "  /agent create [provider] — create an agent session\n",
-                    "  /agent list — list agent sessions\n",
-                    "  /agent chat <id> <msg> — send message to agent\n",
+                    "Commands:\n",
+                    "  /new [provider] — create new agent (default: claude-code)\n",
+                    "  /list — list agents\n",
+                    "  /switch N — switch to agent #N\n",
                     "  /help — show this help\n",
-                    "  (plain text) — forwarded as input to attached session",
+                    "\nSend any text to chat with the current agent.\n",
+                    "If no agent exists, one will be created automatically.",
                 );
                 let _ = outgoing_tx
                     .send(OutgoingMessage {
@@ -484,21 +371,58 @@ impl ImBridge {
                     .await;
             }
             ImCommand::PlainText { text } => {
-                // Forward plain text to the attached session (if any).
-                if let Some(ch) = &channel {
-                    let sessions = channel_sessions.lock().await;
-                    if let Some(session_id) = sessions.get(ch) {
-                        debug!(
-                            session_id = %session_id,
-                            text_len = text.len(),
-                            "forwarding IM text to session PTY"
-                        );
-                        // In a real implementation, this would write to the session's PTY stdin
-                        // via PtyManager. For now we log it.
+                if let Some(ch) = channel.as_ref() {
+                    let session_id = {
+                        let sessions = channel_sessions.lock().await;
+                        sessions.get(ch).cloned()
+                    };
+
+                    let session_id = if let Some(sid) = session_id {
+                        sid
                     } else {
+                        // Auto-create agent
+                        let sid = nanoid::nanoid!(10);
+                        let name = format!("IM-Agent-{}", &sid[..4]);
+                        let cwd = std::env::current_dir()
+                            .unwrap_or_else(|_| std::path::PathBuf::from("/"));
+
+                        match core
+                            .agent_manager
+                            .create_agent(sid.clone(), &name, "claude-code", "", cwd)
+                            .await
+                        {
+                            Ok(()) => {
+                                channel_sessions
+                                    .lock()
+                                    .await
+                                    .insert(ch.clone(), sid.clone());
+                                let _ = outgoing_tx
+                                    .send(OutgoingMessage {
+                                        text: format!("Auto-created agent: {name}"),
+                                        channel: Some(ch.clone()),
+                                    })
+                                    .await;
+                                sid
+                            }
+                            Err(e) => {
+                                let _ = outgoing_tx
+                                    .send(OutgoingMessage {
+                                        text: format!("Failed to create agent: {e}"),
+                                        channel: Some(ch.clone()),
+                                    })
+                                    .await;
+                                return;
+                            }
+                        }
+                    };
+
+                    // Forward message to agent
+                    if let Err(e) =
+                        core.agent_manager.send_message(&session_id, text).await
+                    {
                         let _ = outgoing_tx
                             .send(OutgoingMessage {
-                                text: "Not attached to any session. Use /attach <session_id> first.".to_string(),
+                                text: format!("Failed to send to agent: {e}"),
                                 channel: Some(ch.clone()),
                             })
                             .await;
@@ -516,9 +440,9 @@ impl ImBridge {
     /// Also auto-monitors new agent sessions so their output is forwarded to
     /// all connected IM channels without requiring an explicit `/attach`.
     pub fn start_notification_listener(&self) {
-        let mut control_rx = self.event_bus.subscribe_control();
+        let mut control_rx = self.core.event_bus.subscribe_control();
         let outgoing_tx = self.outgoing_tx.clone();
-        let event_bus = Arc::clone(&self.event_bus);
+        let event_bus = Arc::clone(&self.core.event_bus);
 
         tokio::spawn(async move {
             loop {
@@ -682,7 +606,7 @@ impl ImBridge {
     /// Spawns a background task that reads data events from the session,
     /// strips ANSI codes, and queues batched messages for the IM plugin.
     pub fn monitor_session(&self, session_id: &str, channel_id: &str) {
-        let mut data_rx = self.event_bus.create_data_subscriber(session_id);
+        let mut data_rx = self.core.event_bus.create_data_subscriber(session_id);
         let outgoing_tx = self.outgoing_tx.clone();
         let channel_id = channel_id.to_string();
         let session_id = session_id.to_string();
@@ -923,30 +847,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_command_sessions() {
-        match ImCommand::parse("/sessions") {
-            ImCommand::ListSessions => {}
-            other => panic!("expected ListSessions, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_parse_command_attach() {
-        match ImCommand::parse("/attach my-session-123") {
-            ImCommand::Attach { session_id } => assert_eq!(session_id, "my-session-123"),
-            other => panic!("expected Attach, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_parse_command_task_add() {
-        match ImCommand::parse("/task add Deploy to production") {
-            ImCommand::TaskAdd { description } => assert_eq!(description, "Deploy to production"),
-            other => panic!("expected TaskAdd, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn test_parse_command_plain_text() {
         match ImCommand::parse("hello world") {
             ImCommand::PlainText { text } => assert_eq!(text, "hello world"),
@@ -963,56 +863,50 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_command_detach() {
-        match ImCommand::parse("/detach") {
-            ImCommand::Detach => {}
-            other => panic!("expected Detach, got {other:?}"),
+    fn test_parse_command_new_default() {
+        match ImCommand::parse("/new") {
+            ImCommand::NewAgent { provider } => assert_eq!(provider, "claude-code"),
+            other => panic!("expected NewAgent, got {other:?}"),
         }
     }
 
     #[test]
-    fn test_parse_command_agent_create_default() {
-        match ImCommand::parse("/agent create") {
-            ImCommand::AgentCreate { provider } => assert_eq!(provider, "claude-code"),
-            other => panic!("expected AgentCreate, got {other:?}"),
+    fn test_parse_command_new_provider() {
+        match ImCommand::parse("/new openai") {
+            ImCommand::NewAgent { provider } => assert_eq!(provider, "openai"),
+            other => panic!("expected NewAgent, got {other:?}"),
         }
     }
 
     #[test]
-    fn test_parse_command_agent_create_provider() {
-        match ImCommand::parse("/agent create openai") {
-            ImCommand::AgentCreate { provider } => assert_eq!(provider, "openai"),
-            other => panic!("expected AgentCreate, got {other:?}"),
+    fn test_parse_command_list() {
+        match ImCommand::parse("/list") {
+            ImCommand::ListAgents => {}
+            other => panic!("expected ListAgents, got {other:?}"),
         }
     }
 
     #[test]
-    fn test_parse_command_agent_list() {
-        match ImCommand::parse("/agent list") {
-            ImCommand::AgentList => {}
-            other => panic!("expected AgentList, got {other:?}"),
+    fn test_parse_command_switch() {
+        match ImCommand::parse("/switch 2") {
+            ImCommand::Switch { index } => assert_eq!(index, 2),
+            other => panic!("expected Switch, got {other:?}"),
         }
     }
 
     #[test]
-    fn test_parse_command_agent_list_default() {
-        match ImCommand::parse("/agent") {
-            ImCommand::AgentList => {}
-            other => panic!("expected AgentList (default), got {other:?}"),
+    fn test_parse_command_switch_invalid() {
+        match ImCommand::parse("/switch abc") {
+            ImCommand::Help => {}
+            other => panic!("expected Help for invalid switch, got {other:?}"),
         }
     }
 
     #[test]
-    fn test_parse_command_agent_chat() {
-        match ImCommand::parse("/agent chat sess-123 hello world") {
-            ImCommand::AgentChat {
-                session_id,
-                message,
-            } => {
-                assert_eq!(session_id, "sess-123");
-                assert_eq!(message, "hello world");
-            }
-            other => panic!("expected AgentChat, got {other:?}"),
+    fn test_parse_command_unknown_slash() {
+        match ImCommand::parse("/unknown foo") {
+            ImCommand::PlainText { text } => assert_eq!(text, "/unknown foo"),
+            other => panic!("expected PlainText for unknown command, got {other:?}"),
         }
     }
 }
