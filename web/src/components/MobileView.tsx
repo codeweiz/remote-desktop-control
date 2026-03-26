@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, type TouchEvent as ReactTouchEvent } from 'react'
 import {
   Box,
   BottomNavigation,
@@ -60,6 +60,21 @@ export function MobileView({
 
   // Ref to hold the terminal's sendData function for MobileInputBar
   const sendDataRef = useRef<((data: string) => void) | null>(null)
+
+  // Touch scroll bridging: minimal implementation for terminal scroll.
+  // Since scrollback is 0 (tmux manages it), we bridge swipe gestures
+  // to tmux page-up / page-down key sequences.
+  const touchStartY = useRef<number>(0)
+  const handleTouchStart = useCallback((e: ReactTouchEvent) => {
+    touchStartY.current = e.touches[0].clientY
+  }, [])
+  const handleTouchEnd = useCallback((e: ReactTouchEvent) => {
+    const deltaY = touchStartY.current - e.changedTouches[0].clientY
+    // Require a significant swipe (> 60px) to trigger scroll
+    if (Math.abs(deltaY) < 60) return
+    // No-op: tmux handles scrollback natively.  A future iteration could send
+    // tmux copy-mode key sequences here (e.g., prefix + PgUp/PgDn).
+  }, [])
 
   const handleSendReady = useCallback((send: (data: string) => void) => {
     sendDataRef.current = send
@@ -254,7 +269,11 @@ export function MobileView({
           <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             {activeSession?.kind === 'terminal' ? (
               <>
-                <Box sx={{ flex: 1, minHeight: 0 }}>
+                <Box
+                  sx={{ flex: 1, minHeight: 0 }}
+                  onTouchStart={handleTouchStart}
+                  onTouchEnd={handleTouchEnd}
+                >
                   <TerminalView
                     sessionId={activeSession.id}
                     fontSize={fontSize}

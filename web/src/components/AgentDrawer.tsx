@@ -477,8 +477,13 @@ export function AgentDrawer({ open, session, width, onClose }: AgentDrawerProps)
   const handleAgentMessage = useCallback((msg: WsMessage) => {
     const msgType = msg.type as string
 
-    // status messages (connected / disconnected) -- skip for now
-    if (msgType === 'status') return
+    // On connect, clear messages — the server will replay full history
+    if (msgType === 'status') {
+      if ((msg.status as string) === 'connected') {
+        setMessages([])
+      }
+      return
+    }
 
     if (msgType === 'text') {
       const chatMsg: AgentChatMessage = {

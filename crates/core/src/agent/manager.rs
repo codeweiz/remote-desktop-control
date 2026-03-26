@@ -5,7 +5,7 @@
 //! single execution backend for all agent kinds.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
@@ -17,24 +17,34 @@ use crate::events::{AgentStatus, ControlEvent, DataEvent, ErrorClass, SessionId}
 use super::acp_backend::AcpBackend;
 use super::event::{AgentEvent, AgentKind};
 
+/// Maximum number of automatic restarts before giving up.
+/// Used by the event router when detecting agent crashes (Issue #2 auto-restart).
+#[allow(dead_code)]
+const MAX_RESTART_COUNT: u32 = 3;
+
 /// Tracks state for a managed agent session.
 struct ManagedAgent {
     backend: AcpBackend,
     /// Human-readable session name.
     name: String,
     /// The kind of agent (Claude, Gemini, etc.).
+    /// Retained for future auto-restart.
     #[allow(dead_code)]
     kind: AgentKind,
     /// Working directory the agent was started in.
+    /// Retained for future auto-restart.
     #[allow(dead_code)]
     cwd: PathBuf,
     /// When the agent was created.
     created_at: DateTime<Utc>,
     /// How many times this agent has been restarted.
+    /// Retained for future auto-restart.
     #[allow(dead_code)]
     restart_count: u32,
     /// Optional companion terminal session for this agent.
     companion_terminal_id: Option<String>,
+    /// Persisted event history for replay on reconnect.
+    event_history: Arc<Mutex<Vec<AgentEvent>>>,
 }
 
 /// Manages the lifecycle of all agent sessions.
@@ -82,8 +92,10 @@ impl AgentManager {
         // Attempt to start the backend. On failure, register in crashed state.
         match backend.start(&cwd, None).await {
             Ok(()) => {
+                let event_history: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
+
                 // Start event router that bridges backend events to the event bus.
-                self.start_event_router(session_id.clone(), &backend);
+                self.start_event_router(session_id.clone(), &backend, event_history.clone());
 
                 let managed = ManagedAgent {
                     backend,
@@ -93,6 +105,7 @@ impl AgentManager {
                     created_at,
                     restart_count: 0,
                     companion_terminal_id: None,
+                    event_history,
                 };
 
                 self.agents.insert(session_id.clone(), managed);
@@ -120,6 +133,7 @@ impl AgentManager {
                     created_at,
                     restart_count: 0,
                     companion_terminal_id: None,
+                    event_history: Arc::new(Mutex::new(Vec::new())),
                 };
 
                 self.agents.insert(session_id.clone(), managed);
@@ -204,6 +218,14 @@ impl AgentManager {
             .collect()
     }
 
+    /// Retrieve the full event history for a session (used for replay on reconnect).
+    pub fn get_event_history(&self, session_id: &str) -> Vec<AgentEvent> {
+        self.agents
+            .get(session_id)
+            .map(|entry| entry.event_history.lock().unwrap().clone())
+            .unwrap_or_default()
+    }
+
     /// Check if an agent session exists.
     pub fn has_agent(&self, session_id: &str) -> bool {
         self.agents.contains_key(session_id)
@@ -215,50 +237,41 @@ impl AgentManager {
     }
 
     /// Start routing events from the AcpBackend's broadcast channel to the EventBus.
-    fn start_event_router(&self, session_id: String, backend: &AcpBackend) {
+    /// Also persists events into `event_history` for replay on WebSocket reconnect.
+    fn start_event_router(
+        &self,
+        session_id: String,
+        backend: &AcpBackend,
+        event_history: Arc<Mutex<Vec<AgentEvent>>>,
+    ) {
         let mut rx = backend.subscribe();
         let event_bus = self.event_bus.clone();
         let sid = session_id.clone();
         let mut seq: u64 = 1;
 
         tokio::spawn(async move {
-            while let Ok(event) = rx.recv().await {
-                let data_event = match event {
-                    AgentEvent::Text(content) => DataEvent::AgentText {
-                        seq,
-                        content,
-                        streaming: true,
-                    },
-                    AgentEvent::Thinking(content) => DataEvent::AgentThinking { seq, content },
-                    AgentEvent::ToolUse { name, id, input } => DataEvent::AgentToolUse {
-                        seq,
-                        id,
-                        name,
-                        input: serde_json::Value::String(input.unwrap_or_default()),
-                    },
-                    AgentEvent::ToolResult {
-                        id,
-                        output,
-                        is_error,
-                    } => DataEvent::AgentToolResult {
-                        seq,
-                        id,
-                        output: output.unwrap_or_default(),
-                        is_error,
-                    },
-                    AgentEvent::Progress(message) => DataEvent::AgentProgress { seq, message },
-                    AgentEvent::TurnComplete { cost_usd, .. } => {
-                        DataEvent::AgentTurnComplete { seq, cost_usd }
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        // Persist event for replay
+                        if let Ok(mut history) = event_history.lock() {
+                            history.push(event.clone());
+                        }
+
+                        let data_event = agent_event_to_data_event(seq, &event);
+                        seq += 1;
+                        event_bus.publish_data(&sid, data_event).await;
                     }
-                    AgentEvent::Error(message) => DataEvent::AgentError {
-                        seq,
-                        message,
-                        severity: ErrorClass::Transient,
-                        guidance: String::new(),
-                    },
-                };
-                seq += 1;
-                event_bus.publish_data(&sid, data_event).await;
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(session_id = %sid, skipped = n, "event router lagged, some events lost");
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Agent broadcast channel closed — agent process died
+                        info!(session_id = %sid, "agent event channel closed");
+                        break;
+                    }
+                }
             }
         });
     }
@@ -285,5 +298,51 @@ fn parse_agent_kind(provider: &str) -> AgentKind {
         "codex" => AgentKind::Codex,
         // Default to Claude for unknown providers
         _ => AgentKind::Claude,
+    }
+}
+
+/// Convert an `AgentEvent` to a `DataEvent` with the given sequence number.
+/// Shared between live event routing and history replay.
+pub fn agent_event_to_data_event(seq: u64, event: &AgentEvent) -> DataEvent {
+    match event {
+        AgentEvent::Text(content) => DataEvent::AgentText {
+            seq,
+            content: content.clone(),
+            streaming: true,
+        },
+        AgentEvent::Thinking(content) => DataEvent::AgentThinking {
+            seq,
+            content: content.clone(),
+        },
+        AgentEvent::ToolUse { name, id, input } => DataEvent::AgentToolUse {
+            seq,
+            id: id.clone(),
+            name: name.clone(),
+            input: serde_json::Value::String(input.clone().unwrap_or_default()),
+        },
+        AgentEvent::ToolResult {
+            id,
+            output,
+            is_error,
+        } => DataEvent::AgentToolResult {
+            seq,
+            id: id.clone(),
+            output: output.clone().unwrap_or_default(),
+            is_error: *is_error,
+        },
+        AgentEvent::Progress(message) => DataEvent::AgentProgress {
+            seq,
+            message: message.clone(),
+        },
+        AgentEvent::TurnComplete { cost_usd, .. } => DataEvent::AgentTurnComplete {
+            seq,
+            cost_usd: *cost_usd,
+        },
+        AgentEvent::Error(message) => DataEvent::AgentError {
+            seq,
+            message: message.clone(),
+            severity: ErrorClass::Transient,
+            guidance: String::new(),
+        },
     }
 }

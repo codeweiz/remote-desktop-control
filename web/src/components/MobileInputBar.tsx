@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react'
 import { Box, IconButton, TextField } from '@mui/material'
 import KeyboardReturnIcon from '@mui/icons-material/KeyboardReturn'
+import { useVisualViewportHeight } from '../hooks/useVisualViewportHeight'
 
 interface MobileInputBarProps {
   onSend: (data: string) => void
@@ -19,6 +20,8 @@ const SPECIAL_KEYS = [
 export default function MobileInputBar({ onSend }: MobileInputBarProps) {
   const [ctrlActive, setCtrlActive] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const vpHeight = useVisualViewportHeight()
+  const keyboardOpen = vpHeight < window.innerHeight * 0.8
 
   const handleKey = (data: string | null) => {
     if (data === null) {
@@ -53,9 +56,11 @@ export default function MobileInputBar({ onSend }: MobileInputBarProps) {
       alignItems: 'center',
       gap: 0.5,
       p: 0.5,
+      pb: keyboardOpen ? `${window.innerHeight - vpHeight + 4}px` : 0.5,
       bgcolor: 'background.paper',
       borderTop: '1px solid',
       borderColor: 'divider',
+      transition: 'padding-bottom 0.15s ease',
     }}>
       {SPECIAL_KEYS.map(({ label, data }) => (
         <IconButton

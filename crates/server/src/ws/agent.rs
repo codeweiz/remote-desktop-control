@@ -17,6 +17,7 @@ use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, warn};
 
 use crate::state::AppState;
+use rtb_core::agent::manager::agent_event_to_data_event;
 use rtb_core::events::DataEvent;
 
 /// Query parameters for the agent WebSocket endpoint.
@@ -98,6 +99,21 @@ async fn handle_agent(
     {
         warn!(session_id = %session_id, "failed to send initial status, closing");
         return;
+    }
+
+    // Replay event history for reconnecting clients
+    let history = state.core.agent_manager.get_event_history(&session_id);
+    if !history.is_empty() {
+        debug!(session_id = %session_id, count = history.len(), "replaying event history");
+        for (i, event) in history.iter().enumerate() {
+            let seq = (i + 1) as u64;
+            let data_event = agent_event_to_data_event(seq, event);
+            let msg = data_event_to_json(&data_event);
+            if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
+                warn!(session_id = %session_id, "failed to send replay event, closing");
+                return;
+            }
+        }
     }
 
     // Heartbeat: ping every 30 seconds
@@ -283,4 +299,60 @@ async fn handle_agent(
     }
 
     info!(session_id = %session_id, "agent WebSocket disconnected");
+}
+
+/// Convert a DataEvent to a JSON value for sending over WebSocket.
+/// Used both for live events and history replay.
+fn data_event_to_json(event: &DataEvent) -> serde_json::Value {
+    match event {
+        DataEvent::AgentText { seq, content, streaming } => serde_json::json!({
+            "type": "text",
+            "seq": seq,
+            "content": content,
+            "streaming": streaming,
+        }),
+        DataEvent::AgentThinking { seq, content } => serde_json::json!({
+            "type": "thinking",
+            "seq": seq,
+            "content": content,
+        }),
+        DataEvent::AgentToolUse { seq, id, name, input } => serde_json::json!({
+            "type": "tool_use",
+            "seq": seq,
+            "id": id,
+            "name": name,
+            "input": input,
+        }),
+        DataEvent::AgentToolResult { seq, id, output, is_error } => serde_json::json!({
+            "type": "tool_result",
+            "seq": seq,
+            "id": id,
+            "output": output,
+            "is_error": is_error,
+        }),
+        DataEvent::AgentProgress { seq, message } => serde_json::json!({
+            "type": "progress",
+            "seq": seq,
+            "message": message,
+        }),
+        DataEvent::AgentTurnComplete { seq, cost_usd } => serde_json::json!({
+            "type": "turn_complete",
+            "seq": seq,
+            "cost_usd": cost_usd,
+        }),
+        DataEvent::AgentError { seq, message, severity, guidance } => {
+            let severity_str = match severity {
+                rtb_core::events::ErrorClass::Transient => "transient",
+                rtb_core::events::ErrorClass::Permanent => "permanent",
+            };
+            serde_json::json!({
+                "type": "error",
+                "seq": seq,
+                "message": message,
+                "severity": severity_str,
+                "guidance": guidance,
+            })
+        }
+        _ => serde_json::json!({ "type": "unknown" }),
+    }
 }
