@@ -189,6 +189,35 @@ impl TaskPool {
         Ok(())
     }
 
+    /// Set the session ID for a running task.
+    pub async fn set_session_id(
+        &self,
+        id: &str,
+        session_id: String,
+    ) -> Result<(), TaskPoolError> {
+        let mut tasks = self.tasks.write().await;
+        let task = tasks
+            .iter_mut()
+            .find(|t| t.id == id)
+            .ok_or_else(|| TaskPoolError::NotFound(id.to_string()))?;
+
+        task.session_id = Some(session_id);
+        task.updated_at = Utc::now();
+
+        drop(tasks);
+        self.save().await?;
+        Ok(())
+    }
+
+    /// Find a running task by its session ID.
+    pub async fn find_by_session_id(&self, session_id: &str) -> Option<Task> {
+        let tasks = self.tasks.read().await;
+        tasks
+            .iter()
+            .find(|t| t.session_id.as_deref() == Some(session_id))
+            .cloned()
+    }
+
     /// Set the result for a completed/failed task.
     pub async fn set_result(
         &self,

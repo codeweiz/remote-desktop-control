@@ -25,6 +25,8 @@ pub struct CoreState {
     pub task_pool: Arc<task_pool::pool::TaskPool>,
     pub notification_router: Arc<notification::router::NotificationRouter>,
     pub notification_store: Arc<notification::store::NotificationStore>,
+    /// Handle to the background task dispatcher (dropped on shutdown).
+    pub task_dispatcher_handle: Option<task_pool::scheduler::DispatcherHandle>,
 }
 
 impl CoreState {
@@ -72,6 +74,18 @@ impl CoreState {
         // sessions automatically get a detector task.
         pty_manager.set_notification_router(Arc::clone(&notification_router));
 
+        // Task dispatcher: auto-assigns pending tasks to idle agents.
+        let scheduler_config = task_pool::scheduler::SchedulerConfig::from_pool_config(
+            &config.task_pool,
+        );
+        let dispatcher = task_pool::scheduler::TaskDispatcher::new(
+            scheduler_config,
+            Arc::clone(&task_pool),
+            Arc::clone(&agent_manager),
+            Arc::clone(&event_bus),
+        );
+        let dispatcher_handle = dispatcher.start();
+
         Ok(Self {
             config,
             event_bus,
@@ -81,6 +95,7 @@ impl CoreState {
             task_pool,
             notification_router,
             notification_store,
+            task_dispatcher_handle: Some(dispatcher_handle),
         })
     }
 }

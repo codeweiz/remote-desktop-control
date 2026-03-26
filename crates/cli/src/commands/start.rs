@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use qrcode::QrCode;
 use rtb_core::config::Config;
-use rtb_core::task_pool::scheduler::{SchedulerConfig, TaskScheduler};
 use rtb_core::CoreState;
 use rtb_plugin_host::manager::PluginManager;
 
@@ -73,15 +72,8 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
         tracing::warn!(error = %e, "Failed to load task pool from disk (continuing with empty pool)");
     }
 
-    // 8. Start task pool scheduler as a background task
-    let scheduler_config = SchedulerConfig {
-        max_concurrent: config.task_pool.max_concurrent,
-        auto_start: config.task_pool.auto_start,
-        poll_interval_secs: 5,
-    };
-    let task_scheduler = TaskScheduler::new(scheduler_config, Arc::clone(&core.task_pool));
-    let scheduler_handle = task_scheduler.start();
-    tracing::info!("Task pool scheduler started");
+    // 8. Task dispatcher is already running (started by CoreState::new)
+    tracing::info!("Task pool dispatcher started");
 
     // 9. Start plugin manager (discovers and spawns plugins from ~/.rtb/plugins/)
     let plugins_dir = PathBuf::from(&config.plugins.dir);
@@ -157,9 +149,11 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
 
         tracing::info!("Shutting down...");
 
-        // Stop the task pool scheduler
-        scheduler_handle.stop();
-        tracing::info!("Task scheduler stopped");
+        // Stop the task pool dispatcher (if running)
+        if let Some(ref handle) = shutdown_core.task_dispatcher_handle {
+            handle.stop();
+        }
+        tracing::info!("Task dispatcher stopped");
 
         // Save the task pool to disk
         if let Err(e) = shutdown_core.task_pool.save().await {

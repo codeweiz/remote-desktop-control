@@ -1,6 +1,7 @@
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Application configuration, loaded from `~/.rtb/config.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -100,6 +101,33 @@ pub struct PluginsConfig {
     pub im_throttle_interval_ms: u64,
     pub jsonrpc_timeout_secs: u64,
     pub max_message_size_bytes: usize,
+}
+
+// ---------------------------------------------------------------------------
+// Workspace config (.rtb.toml) — hot-reloadable subset
+// ---------------------------------------------------------------------------
+
+/// Workspace-level configuration loaded from `.rtb.toml` in a project directory.
+/// Fields are all optional; only set values override the global config.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct WorkspaceConfig {
+    pub agent: Option<WorkspaceAgentConfig>,
+    pub task_pool: Option<WorkspaceTaskPoolConfig>,
+}
+
+/// Workspace-level agent overrides.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkspaceAgentConfig {
+    pub default_provider: Option<String>,
+    pub auto_approve_tools: Option<bool>,
+    pub system_prompt: Option<String>,
+}
+
+/// Workspace-level task pool overrides.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkspaceTaskPoolConfig {
+    pub auto_start: Option<bool>,
+    pub max_concurrent: Option<usize>,
 }
 
 // ---------------------------------------------------------------------------
@@ -538,6 +566,29 @@ impl Config {
         self.logging.access_log = expand_tilde_in_str(&self.logging.access_log);
         self.plugins.dir = expand_tilde_in_str(&self.plugins.dir);
     }
+
+    /// Merge workspace config on top of global config.
+    /// Workspace values override global where set.
+    pub fn merge_workspace(&self, ws: &WorkspaceConfig) -> Config {
+        let mut merged = self.clone();
+        if let Some(ref agent) = ws.agent {
+            if let Some(ref p) = agent.default_provider {
+                merged.agent.default_provider = p.clone();
+            }
+            if let Some(v) = agent.auto_approve_tools {
+                merged.agent.auto_approve_tools = v;
+            }
+        }
+        if let Some(ref tp) = ws.task_pool {
+            if let Some(v) = tp.max_concurrent {
+                merged.task_pool.max_concurrent = v;
+            }
+            if let Some(v) = tp.auto_start {
+                merged.task_pool.auto_start = v;
+            }
+        }
+        merged
+    }
 }
 
 /// Replace a leading `~` with the user's home directory.
@@ -548,6 +599,45 @@ fn expand_tilde_in_str(s: &str) -> String {
         }
     }
     s.to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Workspace config loading & hot reload
+// ---------------------------------------------------------------------------
+
+/// Load workspace config from `.rtb.toml` in the given directory.
+/// Returns `None` if the file doesn't exist or cannot be parsed.
+pub fn load_workspace_config(dir: &Path) -> Option<WorkspaceConfig> {
+    let path = dir.join(".rtb.toml");
+    if !path.exists() {
+        return None;
+    }
+    let content = std::fs::read_to_string(&path).ok()?;
+    toml::from_str(&content).ok()
+}
+
+/// Watch a config file for changes and invoke `callback` on modify/create.
+///
+/// Watches the parent directory of `path` (non-recursively) so that file
+/// creation is also detected. The returned [`RecommendedWatcher`] must be
+/// kept alive for the watch to remain active.
+pub fn watch_config(
+    path: PathBuf,
+    callback: impl Fn() + Send + 'static,
+) -> Option<RecommendedWatcher> {
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        if let Ok(event) = res {
+            if event.kind.is_modify() || event.kind.is_create() {
+                callback();
+            }
+        }
+    })
+    .ok()?;
+
+    if let Some(parent) = path.parent() {
+        watcher.watch(parent, RecursiveMode::NonRecursive).ok()?;
+    }
+    Some(watcher)
 }
 
 // ---------------------------------------------------------------------------
