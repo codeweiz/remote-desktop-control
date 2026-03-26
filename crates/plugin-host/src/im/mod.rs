@@ -288,8 +288,17 @@ impl ImBridge {
                 {
                     Ok(()) => {
                         if let Some(ch) = channel.as_ref() {
-                            let mut sessions = channel_sessions.lock().await;
-                            sessions.insert(ch.clone(), session_id.clone());
+                            channel_sessions
+                                .lock()
+                                .await
+                                .insert(ch.clone(), session_id.clone());
+                            // Start monitoring agent output for this channel
+                            Self::spawn_channel_monitor(
+                                &core.event_bus,
+                                &session_id,
+                                ch,
+                                outgoing_tx.clone(),
+                            );
                         }
                         format!("Agent created: {name}\nYou can start chatting now.")
                     }
@@ -343,6 +352,13 @@ impl ImBridge {
                             .lock()
                             .await
                             .insert(ch.clone(), sid.clone());
+                        // Start monitoring the switched-to agent's output
+                        Self::spawn_channel_monitor(
+                            &core.event_bus,
+                            sid,
+                            ch,
+                            outgoing_tx.clone(),
+                        );
                     }
                     format!("Switched to {name}")
                 };
@@ -396,6 +412,13 @@ impl ImBridge {
                                     .lock()
                                     .await
                                     .insert(ch.clone(), sid.clone());
+                                // Start monitoring agent output for this channel
+                                Self::spawn_channel_monitor(
+                                    &core.event_bus,
+                                    &sid,
+                                    ch,
+                                    outgoing_tx.clone(),
+                                );
                                 let _ = outgoing_tx
                                     .send(OutgoingMessage {
                                         text: format!("Auto-created agent: {name}"),
@@ -500,6 +523,80 @@ impl ImBridge {
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         break;
                     }
+                }
+            }
+        });
+    }
+
+    /// Spawn a monitor for an agent session that sends output to a specific IM channel.
+    fn spawn_channel_monitor(
+        event_bus: &EventBus,
+        session_id: &str,
+        channel_id: &str,
+        outgoing_tx: mpsc::Sender<OutgoingMessage>,
+    ) {
+        let mut data_rx = event_bus.create_data_subscriber(session_id);
+        let session_id = session_id.to_string();
+        let channel_id = channel_id.to_string();
+
+        tokio::spawn(async move {
+            loop {
+                match data_rx.recv().await {
+                    Some(DataEvent::AgentText { content, .. }) => {
+                        if !content.is_empty() {
+                            let _ = outgoing_tx.send(OutgoingMessage {
+                                text: content,
+                                channel: Some(channel_id.clone()),
+                            }).await;
+                        }
+                    }
+                    Some(DataEvent::AgentThinking { .. }) => {}
+                    Some(DataEvent::AgentToolUse { name, .. }) => {
+                        let _ = outgoing_tx.send(OutgoingMessage {
+                            text: format!("\u{1f527} {name}"),
+                            channel: Some(channel_id.clone()),
+                        }).await;
+                    }
+                    Some(DataEvent::AgentToolResult { output, is_error, .. }) => {
+                        let prefix = if is_error { "Error" } else { "Result" };
+                        let truncated = if output.len() > AGENT_TOOL_RESULT_MAX_LEN {
+                            format!("{}...[truncated]", &output[..AGENT_TOOL_RESULT_MAX_LEN])
+                        } else {
+                            output
+                        };
+                        let _ = outgoing_tx.send(OutgoingMessage {
+                            text: format!("{prefix}: {truncated}"),
+                            channel: Some(channel_id.clone()),
+                        }).await;
+                    }
+                    Some(DataEvent::AgentProgress { message, .. }) => {
+                        let _ = outgoing_tx.send(OutgoingMessage {
+                            text: format!("[progress] {message}"),
+                            channel: Some(channel_id.clone()),
+                        }).await;
+                    }
+                    Some(DataEvent::AgentTurnComplete { cost_usd, .. }) => {
+                        let cost_info = cost_usd
+                            .map(|c| format!(" (${c:.4})"))
+                            .unwrap_or_default();
+                        let _ = outgoing_tx.send(OutgoingMessage {
+                            text: format!("\u{2705} Done{cost_info}"),
+                            channel: Some(channel_id.clone()),
+                        }).await;
+                    }
+                    Some(DataEvent::AgentError { message, guidance, .. }) => {
+                        let text = if guidance.is_empty() {
+                            format!("\u{274c} {message}")
+                        } else {
+                            format!("\u{274c} {message}\n{guidance}")
+                        };
+                        let _ = outgoing_tx.send(OutgoingMessage {
+                            text,
+                            channel: Some(channel_id.clone()),
+                        }).await;
+                    }
+                    Some(DataEvent::PtyOutput { .. }) | Some(DataEvent::PtyExited { .. }) => {}
+                    None => return,
                 }
             }
         });
