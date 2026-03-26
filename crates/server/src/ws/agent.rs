@@ -35,6 +35,9 @@ enum AgentClientCommand {
     /// Send a user message to the agent.
     #[serde(rename = "message")]
     Message { text: String },
+    /// Cancel the current agent turn.
+    #[serde(rename = "cancel")]
+    Cancel,
 }
 
 /// Agent WebSocket upgrade handler.
@@ -117,11 +120,19 @@ async fn handle_agent(
                                         error!(session_id = %session_id, error = %e, "failed to send message to agent");
                                         let err_msg = serde_json::json!({
                                             "type": "error",
-                                            "error": e.to_string(),
+                                            "seq": 0,
+                                            "message": e.to_string(),
+                                            "severity": "transient",
+                                            "guidance": "Try sending the message again.",
                                         });
                                         let _ = ws_tx.send(Message::Text(err_msg.to_string().into())).await;
                                     }
                                 }
+                            }
+                            Ok(AgentClientCommand::Cancel) => {
+                                debug!(session_id = %session_id, "received cancel request");
+                                // Cancel is best-effort; agent may already have finished
+                                warn!(session_id = %session_id, "cancel not yet implemented in agent manager");
                             }
                             Err(e) => {
                                 warn!(session_id = %session_id, error = %e, text = %text, "unknown agent client command");
@@ -154,24 +165,24 @@ async fn handle_agent(
                 match event {
                     Some(DataEvent::AgentText { seq, content, streaming }) => {
                         let msg = serde_json::json!({
-                            "type": "agent_text",
+                            "type": "text",
                             "seq": seq,
                             "content": content,
                             "streaming": streaming,
                         });
                         if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
-                            debug!(session_id = %session_id, "failed to send agent text, closing");
+                            debug!(session_id = %session_id, "failed to send text, closing");
                             break;
                         }
                     }
                     Some(DataEvent::AgentThinking { seq, content }) => {
                         let msg = serde_json::json!({
-                            "type": "agent_thinking",
+                            "type": "thinking",
                             "seq": seq,
                             "content": content,
                         });
                         if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
-                            debug!(session_id = %session_id, "failed to send agent thinking, closing");
+                            debug!(session_id = %session_id, "failed to send thinking, closing");
                             break;
                         }
                     }
@@ -203,12 +214,12 @@ async fn handle_agent(
                     }
                     Some(DataEvent::AgentProgress { seq, message }) => {
                         let msg = serde_json::json!({
-                            "type": "agent_progress",
+                            "type": "progress",
                             "seq": seq,
                             "message": message,
                         });
                         if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
-                            debug!(session_id = %session_id, "failed to send agent_progress, closing");
+                            debug!(session_id = %session_id, "failed to send progress, closing");
                             break;
                         }
                     }
@@ -223,15 +234,20 @@ async fn handle_agent(
                             break;
                         }
                     }
-                    Some(DataEvent::AgentError { seq, message, severity: _, guidance }) => {
+                    Some(DataEvent::AgentError { seq, message, severity, guidance }) => {
+                        let severity_str = match severity {
+                            rtb_core::events::ErrorClass::Transient => "transient",
+                            rtb_core::events::ErrorClass::Permanent => "permanent",
+                        };
                         let msg = serde_json::json!({
-                            "type": "agent_error",
+                            "type": "error",
                             "seq": seq,
                             "message": message,
+                            "severity": severity_str,
                             "guidance": guidance,
                         });
                         if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
-                            debug!(session_id = %session_id, "failed to send agent_error, closing");
+                            debug!(session_id = %session_id, "failed to send error, closing");
                             break;
                         }
                     }

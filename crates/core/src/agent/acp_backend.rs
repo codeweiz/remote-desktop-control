@@ -80,9 +80,16 @@ impl AcpBackend {
         self.cmd_tx = Some(cmd_tx);
         self.thread_handle = Some(handle);
 
-        ready_rx
-            .await
-            .map_err(|_| "ACP thread died during init".to_string())?
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            ready_rx,
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err("ACP thread died during init".to_string()),
+            Err(_) => Err("ACP initialization timed out after 15s".to_string()),
+        }
     }
 
     /// Send a prompt and wait until the agent finishes the turn.
@@ -194,27 +201,33 @@ async fn acp_session_loop(
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
     // --- Obtain read/write streams depending on agent kind -------------------
+    tracing::info!("[{}-acp] step: obtaining read/write streams", kind);
     let (read_stream, write_stream, _claude_thread): (
         tokio::io::DuplexStream,
         tokio::io::DuplexStream,
         Option<std::thread::JoinHandle<()>>,
     ) = match kind {
         AgentKind::Claude => {
+            tracing::info!("[{}-acp] step: spawning claude bridge", kind);
             let (r, w, h) =
                 super::claude_bridge::spawn_claude_bridge(cwd.clone(), system_prompt.clone());
+            tracing::info!("[{}-acp] step: claude bridge spawned", kind);
             (r, w, Some(h))
         }
         _ => {
+            tracing::info!("[{}-acp] step: spawning native ACP subprocess", kind);
             let (r, w) = super::native_acp::spawn_native_acp(
                 &kind,
                 &cwd,
                 system_prompt.as_deref(),
             )?;
+            tracing::info!("[{}-acp] step: native ACP subprocess spawned", kind);
             (r, w, None)
         }
     };
 
     // --- Create ACP ClientSideConnection ------------------------------------
+    tracing::info!("[{}-acp] step: creating ClientSideConnection", kind);
     let client_handler = SharedAcpClientHandler {
         event_tx: event_tx.clone(),
     };
@@ -227,9 +240,10 @@ async fn acp_session_loop(
         },
     );
     tokio::task::spawn_local(handle_io);
+    tracing::info!("[{}-acp] step: ClientSideConnection created, IO task spawned", kind);
 
     // --- Initialize ----------------------------------------------------------
-    tracing::info!("[{}-acp] sending initialize...", kind);
+    tracing::info!("[{}-acp] step: sending initialize request...", kind);
     let _init_resp = conn
         .initialize(
             acp::InitializeRequest::new(acp::ProtocolVersion::V1)
@@ -237,17 +251,17 @@ async fn acp_session_loop(
         )
         .await
         .map_err(|e| format!("ACP initialize failed: {}", e))?;
-    tracing::info!("[{}-acp] initialize ok", kind);
+    tracing::info!("[{}-acp] step: initialize ok", kind);
 
     // --- Create session ------------------------------------------------------
-    tracing::info!("[{}-acp] creating session in {:?}...", kind, &cwd);
+    tracing::info!("[{}-acp] step: creating session in {:?}...", kind, &cwd);
     let session_resp = conn
         .new_session(acp::NewSessionRequest::new(cwd))
         .await
         .map_err(|e| format!("ACP new_session failed: {}", e))?;
 
     let session_id = session_resp.session_id;
-    tracing::info!("[{}-acp] session created: {:?}", kind, session_id);
+    tracing::info!("[{}-acp] step: session created: {:?}", kind, session_id);
 
     // Signal that initialization is complete.
     let _ = ready_tx.send(Ok(()));

@@ -14,6 +14,7 @@ export interface Session {
   shell: string | null
   cols: number
   rows: number
+  provider?: string
 }
 
 export interface SessionCreateRequest {

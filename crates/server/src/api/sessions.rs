@@ -31,6 +31,8 @@ pub struct CreateSessionRequest {
     pub provider: Option<String>,
     /// Agent model (e.g., "claude-sonnet-4-20250514"). Only for agent sessions.
     pub model: Option<String>,
+    /// Parent terminal session ID. Used to bind an agent to a companion terminal.
+    pub parent_id: Option<String>,
 }
 
 fn default_session_type() -> String {
@@ -105,12 +107,13 @@ pub async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
             AgentStatus::Idle => "idle",
             AgentStatus::Crashed { .. } => "crashed",
         };
+        let parent_id = state.core.agent_manager.get_companion_terminal(&agent_id);
         list.push(SessionInfo {
             id: agent_id,
             name: agent_name,
             kind: "agent".to_string(),
             status: status.to_string(),
-            parent_id: None,
+            parent_id,
             created_at: agent_created_at.to_rfc3339(),
             exit_code: None,
             shell: None,
@@ -146,15 +149,24 @@ pub async fn create_session(
                 .create_agent(session_id.clone(), &body.name, provider, model, cwd)
                 .await
             {
-                Ok(()) => (
-                    StatusCode::CREATED,
-                    Json(CreateSessionResponse {
-                        id: session_id,
-                        status: Some("initializing".to_string()),
-                        error: None,
-                    }),
-                )
-                    .into_response(),
+                Ok(()) => {
+                    // Link agent to companion terminal if parent_id is provided
+                    if let Some(ref parent_id) = body.parent_id {
+                        let _ = state
+                            .core
+                            .agent_manager
+                            .set_companion_terminal(&session_id, parent_id);
+                    }
+                    (
+                        StatusCode::CREATED,
+                        Json(CreateSessionResponse {
+                            id: session_id,
+                            status: Some("initializing".to_string()),
+                            error: None,
+                        }),
+                    )
+                        .into_response()
+                }
                 Err(e) => (
                     StatusCode::CREATED,
                     Json(CreateSessionResponse {
@@ -213,6 +225,13 @@ pub async fn delete_session(
                     .into_response()
             }
         }
+    }
+
+    // Cascade: kill any companion agents bound to this terminal before
+    // destroying the terminal session itself.
+    let companion_agents = state.core.agent_manager.find_agents_for_terminal(&id);
+    for agent_id in companion_agents {
+        let _ = state.core.agent_manager.kill_agent(&agent_id).await;
     }
 
     match state.core.pty_manager.kill_session(&id).await {

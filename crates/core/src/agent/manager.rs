@@ -34,7 +34,6 @@ struct ManagedAgent {
     #[allow(dead_code)]
     restart_count: u32,
     /// Optional companion terminal session for this agent.
-    #[allow(dead_code)]
     companion_terminal_id: Option<String>,
 }
 
@@ -180,6 +179,28 @@ impl AgentManager {
                     m.created_at,
                 )
             })
+            .collect()
+    }
+
+    /// Set the companion terminal for an agent.
+    pub fn set_companion_terminal(&self, agent_session_id: &str, terminal_id: &str) -> Result<(), String> {
+        let mut entry = self.agents.get_mut(agent_session_id)
+            .ok_or_else(|| format!("agent not found: {}", agent_session_id))?;
+        entry.companion_terminal_id = Some(terminal_id.to_string());
+        Ok(())
+    }
+
+    /// Get the companion terminal ID for an agent.
+    pub fn get_companion_terminal(&self, agent_session_id: &str) -> Option<String> {
+        self.agents.get(agent_session_id)
+            .and_then(|entry| entry.companion_terminal_id.clone())
+    }
+
+    /// Find agents that have this terminal as companion.
+    pub fn find_agents_for_terminal(&self, terminal_id: &str) -> Vec<String> {
+        self.agents.iter()
+            .filter(|entry| entry.companion_terminal_id.as_deref() == Some(terminal_id))
+            .map(|entry| entry.key().clone())
             .collect()
     }
 

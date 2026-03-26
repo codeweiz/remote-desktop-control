@@ -6,6 +6,15 @@ import {
   IconButton,
   Grid,
   Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material'
 import {
   Terminal as TerminalIcon,
@@ -13,11 +22,104 @@ import {
   Add as AddIcon,
   Delete as DeleteIcon,
   PlayArrow as PlayIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material'
 import type { Session, SessionCreateRequest } from '../lib/types'
 import type { SessionTree } from '../hooks/useSessions'
 import { TaskPool } from './TaskPool'
 import { StatusChip } from './StatusChip'
+
+const AGENT_PROVIDERS = [
+  { id: 'claude-code', label: 'Claude Code', icon: '\u{1F916}' },
+  { id: 'gemini', label: 'Gemini CLI', icon: '\u{1F48E}' },
+  { id: 'opencode', label: 'OpenCode', icon: '\u{1F4DD}' },
+  { id: 'codex', label: 'Codex', icon: '\u{1F527}' },
+]
+
+function providerLabel(providerId?: string): string {
+  if (!providerId) return 'claude-code'
+  const found = AGENT_PROVIDERS.find(p => p.id === providerId)
+  return found ? found.label : providerId
+}
+
+function NewAgentDialog({
+  open,
+  onSelect,
+  onClose,
+}: {
+  open: boolean
+  onSelect: (providerId: string) => void
+  onClose: () => void
+}) {
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      PaperProps={{
+        sx: {
+          bgcolor: '#0f172a',
+          border: '1px solid rgba(139,92,246,0.3)',
+          borderRadius: 2,
+          minWidth: 320,
+        },
+      }}
+    >
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 0.5 }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 600, fontSize: 14 }}>
+          Select Agent Provider
+        </Typography>
+        <IconButton size="small" onClick={onClose} sx={{ color: 'text.secondary' }}>
+          <CloseIcon sx={{ fontSize: 16 }} />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent sx={{ pt: 1, pb: 0 }}>
+        <List disablePadding>
+          {AGENT_PROVIDERS.map(provider => (
+            <ListItemButton
+              key={provider.id}
+              onClick={() => onSelect(provider.id)}
+              sx={{
+                borderRadius: 1,
+                mb: 0.5,
+                py: 1,
+                '&:hover': {
+                  bgcolor: 'rgba(139,92,246,0.1)',
+                },
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 36, fontSize: 20 }}>
+                {provider.icon}
+              </ListItemIcon>
+              <ListItemText
+                primary={provider.label}
+                primaryTypographyProps={{
+                  fontSize: 13,
+                  fontWeight: 500,
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}
+                secondary={provider.id}
+                secondaryTypographyProps={{
+                  fontSize: 10,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  color: 'text.secondary',
+                }}
+              />
+            </ListItemButton>
+          ))}
+        </List>
+      </DialogContent>
+      <DialogActions sx={{ px: 2, pb: 1.5 }}>
+        <Button
+          size="small"
+          onClick={onClose}
+          sx={{ fontSize: 11, color: 'text.secondary', textTransform: 'none' }}
+        >
+          Cancel
+        </Button>
+      </DialogActions>
+    </Dialog>
+  )
+}
 
 interface GridViewProps {
   sessions: Session[]
@@ -97,7 +199,7 @@ function SessionCard({
         </IconButton>
       </Box>
 
-      <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
         <StatusChip label={session.status} color={statusColor} />
         <Chip
           size="small"
@@ -109,6 +211,20 @@ function SessionCard({
             color: 'text.secondary',
           }}
         />
+        {isAgent && (
+          <Chip
+            size="small"
+            label={providerLabel(session.provider)}
+            sx={{
+              fontSize: 9,
+              fontWeight: 600,
+              fontFamily: "'JetBrains Mono', monospace",
+              bgcolor: 'rgba(139,92,246,0.15)',
+              color: '#a78bfa',
+              '& .MuiChip-label': { px: 0.75 },
+            }}
+          />
+        )}
       </Box>
 
       {/* Monospace preview area */}
@@ -193,6 +309,8 @@ export function GridView({
   onCreateSession,
   onDeleteSession,
 }: GridViewProps) {
+  const [agentDialogOpen, setAgentDialogOpen] = useState(false)
+
   const handleCreateTerminal = useCallback(async () => {
     try {
       await onCreateSession({ kind: 'terminal' })
@@ -201,9 +319,14 @@ export function GridView({
     }
   }, [onCreateSession])
 
-  const handleCreateAgent = useCallback(async () => {
+  const handleOpenAgentDialog = useCallback(() => {
+    setAgentDialogOpen(true)
+  }, [])
+
+  const handleCreateAgent = useCallback(async (providerId: string) => {
+    setAgentDialogOpen(false)
     try {
-      await onCreateSession({ kind: 'agent' })
+      await onCreateSession({ kind: 'agent', provider: providerId })
     } catch {
       // handled upstream
     }
@@ -239,7 +362,7 @@ export function GridView({
           <NewSessionCard kind="terminal" onCreate={handleCreateTerminal} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-          <NewSessionCard kind="agent" onCreate={handleCreateAgent} />
+          <NewSessionCard kind="agent" onCreate={handleOpenAgentDialog} />
         </Grid>
 
         {/* Task Pool card */}
@@ -275,6 +398,12 @@ export function GridView({
           </Paper>
         </Grid>
       </Grid>
+
+      <NewAgentDialog
+        open={agentDialogOpen}
+        onSelect={handleCreateAgent}
+        onClose={() => setAgentDialogOpen(false)}
+      />
     </Box>
   )
 }
