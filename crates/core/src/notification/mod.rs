@@ -6,6 +6,7 @@
 
 pub mod detector;
 pub mod router;
+pub mod store;
 
 use serde::{Deserialize, Serialize};
 

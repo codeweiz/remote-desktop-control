@@ -215,6 +215,20 @@ fn control_event_to_json(event: &ControlEvent) -> Option<String> {
                 "error": error,
             })
         }
+        ControlEvent::NotificationTriggered {
+            session_id,
+            trigger_type,
+            summary,
+            urgent,
+        } => {
+            serde_json::json!({
+                "type": "notification",
+                "session_id": session_id,
+                "trigger_type": trigger_type,
+                "summary": summary,
+                "urgent": urgent,
+            })
+        }
     };
 
     Some(json.to_string())

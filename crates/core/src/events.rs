@@ -47,6 +47,12 @@ pub enum ControlEvent {
     TunnelDown { reason: String },
     PluginLoaded { plugin_id: PluginId, name: String },
     PluginError { plugin_id: PluginId, error: String },
+    NotificationTriggered {
+        session_id: SessionId,
+        trigger_type: String,
+        summary: String,
+        urgent: bool,
+    },
 }
 
 /// Data events sent through per-session mpsc channels.

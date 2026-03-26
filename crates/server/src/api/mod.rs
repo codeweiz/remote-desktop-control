@@ -1,3 +1,4 @@
+pub mod notifications;
 pub mod plugins;
 pub mod sessions;
 pub mod status;

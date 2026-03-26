@@ -24,6 +24,7 @@ pub struct CoreState {
     pub agent_manager: Arc<agent::manager::AgentManager>,
     pub task_pool: Arc<task_pool::pool::TaskPool>,
     pub notification_router: Arc<notification::router::NotificationRouter>,
+    pub notification_store: Arc<notification::store::NotificationStore>,
 }
 
 impl CoreState {
@@ -62,6 +63,13 @@ impl CoreState {
             Arc::clone(&event_bus),
         ));
 
+        // In-memory notification store (last 100)
+        let notification_store = Arc::new(notification::store::NotificationStore::new());
+
+        // Wire the notification router into the PTY manager so that newly created
+        // sessions automatically get a detector task.
+        pty_manager.set_notification_router(Arc::clone(&notification_router));
+
         Ok(Self {
             config,
             event_bus,
@@ -70,6 +78,7 @@ impl CoreState {
             agent_manager,
             task_pool,
             notification_router,
+            notification_store,
         })
     }
 }

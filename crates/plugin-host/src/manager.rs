@@ -192,6 +192,8 @@ impl PluginManager {
             if let Some(rx) = notification_rx {
                 let bridge = ImBridge::new(Arc::clone(&self.event_bus));
                 bridge.start(rx);
+                // Also listen for NotificationTriggered control events and forward to IM
+                bridge.start_notification_listener();
                 Some(bridge)
             } else {
                 None

@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
@@ -7,7 +7,9 @@ use tracing::{debug, info};
 
 use crate::config::Config;
 use crate::event_bus::EventBus;
-use crate::events::{ControlEvent, SessionType};
+use crate::events::{ControlEvent, DataEvent, SessionType};
+use crate::notification::detector::Detector;
+use crate::notification::router::NotificationRouter;
 
 use super::session::{PtySession, PtySessionInfo};
 
@@ -16,10 +18,12 @@ use super::session::{PtySession, PtySessionInfo};
 /// Provides CRUD operations for terminal sessions, delegating the actual
 /// PTY handling to `PtySession`. Publishes lifecycle events
 /// (`SessionCreated`, `SessionDeleted`) to the EventBus.
+/// Also spawns a notification detector task for each session.
 pub struct PtyManager {
     sessions: DashMap<String, Arc<PtySession>>,
     event_bus: Arc<EventBus>,
     config: Arc<Config>,
+    notification_router: OnceLock<Arc<NotificationRouter>>,
 }
 
 impl PtyManager {
@@ -29,7 +33,13 @@ impl PtyManager {
             sessions: DashMap::new(),
             event_bus,
             config,
+            notification_router: OnceLock::new(),
         }
+    }
+
+    /// Set the notification router. Called once after CoreState is fully initialized.
+    pub fn set_notification_router(&self, router: Arc<NotificationRouter>) {
+        let _ = self.notification_router.set(router);
     }
 
     /// Create a new PTY session.
@@ -69,7 +79,90 @@ impl PtyManager {
             session_type: SessionType::Terminal,
         });
 
+        // Spawn a notification detector task for this session
+        self.start_detector_task(&session_id);
+
         Ok(session_id)
+    }
+
+    /// Spawn a background task that subscribes to the session's data events,
+    /// feeds output to the three-layer detector, and routes any triggers through
+    /// the NotificationRouter so that WS clients and IM bridge receive them.
+    fn start_detector_task(&self, session_id: &str) {
+        let router = match self.notification_router.get() {
+            Some(r) => Arc::clone(r),
+            None => {
+                debug!(session_id = %session_id, "no notification router set, skipping detector");
+                return;
+            }
+        };
+
+        let mut data_rx = self.event_bus.create_data_subscriber(session_id);
+        let sid = session_id.to_string();
+        let silence_threshold = self.config.notification.long_running_threshold_secs;
+        // Use 2x silence threshold as long-running threshold
+        let long_running_threshold = silence_threshold.saturating_mul(2).max(60);
+
+        tokio::spawn(async move {
+            let mut detector = Detector::new(None, silence_threshold, long_running_threshold);
+            let mut periodic_interval = tokio::time::interval(
+                tokio::time::Duration::from_secs(silence_threshold),
+            );
+            // Skip the first immediate tick
+            periodic_interval.tick().await;
+
+            info!(session_id = %sid, "notification detector started");
+
+            loop {
+                tokio::select! {
+                    event = data_rx.recv() => {
+                        match event {
+                            Some(DataEvent::PtyOutput { data, .. }) => {
+                                let text = String::from_utf8_lossy(&data);
+                                let triggers = detector.process_output(&text);
+                                if !triggers.is_empty() {
+                                    debug!(
+                                        session_id = %sid,
+                                        count = triggers.len(),
+                                        "detector fired triggers"
+                                    );
+                                    router.route(&sid, &triggers);
+                                }
+                            }
+                            Some(DataEvent::PtyExited { exit_code }) => {
+                                // Fire a process-exited signal via the detector
+                                let signal = detector.process_monitor.process_exited(
+                                    exit_code, None, 0.0,
+                                );
+                                let triggers = crate::notification::detector::fuse_signals(&[signal]);
+                                if !triggers.is_empty() {
+                                    router.route(&sid, &triggers);
+                                }
+                                debug!(session_id = %sid, exit_code, "detector stopping (PTY exited)");
+                                break;
+                            }
+                            None => {
+                                debug!(session_id = %sid, "data channel closed, detector stopping");
+                                break;
+                            }
+                            _ => {} // ignore resize and other events
+                        }
+                    }
+                    _ = periodic_interval.tick() => {
+                        // Periodic check for stalls / long-running detection
+                        let triggers = detector.periodic_check();
+                        if !triggers.is_empty() {
+                            debug!(
+                                session_id = %sid,
+                                count = triggers.len(),
+                                "periodic detector fired triggers"
+                            );
+                            router.route(&sid, &triggers);
+                        }
+                    }
+                }
+            }
+        });
     }
 
     /// Get a session by ID.

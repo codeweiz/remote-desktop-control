@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tracing::{debug, info};
 
 use crate::event_bus::EventBus;
-use crate::events::{AgentStatus, ControlEvent, ErrorClass};
+use crate::events::{AgentStatus, ControlEvent, ErrorClass, SessionId};
 
 use super::NotifyTrigger;
 
@@ -43,15 +43,16 @@ impl NotificationRouter {
     }
 
     /// Route a batch of triggers to appropriate channels.
-    pub fn route(&self, triggers: &[NotifyTrigger]) {
+    pub fn route(&self, session_id: &SessionId, triggers: &[NotifyTrigger]) {
         for trigger in triggers {
-            self.route_single(trigger);
+            self.route_single(session_id, trigger);
         }
     }
 
-    /// Route a single trigger.
-    fn route_single(&self, trigger: &NotifyTrigger) {
-        match trigger {
+    /// Route a single trigger — emits a NotificationTriggered control event for
+    /// every trigger type so that WS clients and IM bridge can pick them up.
+    fn route_single(&self, session_id: &SessionId, trigger: &NotifyTrigger) {
+        let (trigger_type, summary, urgent) = match trigger {
             NotifyTrigger::ProcessExited {
                 exit_code,
                 command,
@@ -64,8 +65,12 @@ impl NotificationRouter {
                     channels = ?self.config.channels,
                     "routing ProcessExited notification"
                 );
-                // Emit as a control event for now.
-                // The server's WebSocket handler and IM bridge will pick this up.
+                let cmd_str = command.as_deref().unwrap_or("(unknown)");
+                let summary = format!(
+                    "Process `{cmd_str}` exited with code {exit_code} after {duration_secs:.1}s"
+                );
+                let urgent = *exit_code != 0;
+                ("process_exited".to_string(), summary, urgent)
             }
 
             NotifyTrigger::WaitingForInput {
@@ -77,6 +82,12 @@ impl NotificationRouter {
                     prompt_text = ?prompt_text,
                     "routing WaitingForInput notification"
                 );
+                let prompt = prompt_text
+                    .as_deref()
+                    .unwrap_or("Terminal is waiting for input");
+                let summary = format!("Waiting for input ({prompt_type:?}): {prompt}");
+                let urgent = matches!(prompt_type, super::PromptType::Password);
+                ("waiting_input".to_string(), summary, urgent)
             }
 
             NotifyTrigger::LongRunningDone {
@@ -90,6 +101,10 @@ impl NotificationRouter {
                     success = success,
                     "routing LongRunningDone notification"
                 );
+                let cmd_str = command.as_deref().unwrap_or("Command");
+                let status = if *success { "succeeded" } else { "failed" };
+                let summary = format!("{cmd_str} {status} after {duration_secs:.1}s");
+                ("long_running_done".to_string(), summary, !success)
             }
 
             NotifyTrigger::ErrorDetected { error_text } => {
@@ -97,47 +112,62 @@ impl NotificationRouter {
                     error_text = ?error_text,
                     "routing ErrorDetected notification"
                 );
+                let text = error_text.as_deref().unwrap_or("Unknown error");
+                let summary = format!("Error detected: {text}");
+                ("error_detected".to_string(), summary, true)
             }
 
-            NotifyTrigger::AgentCompleted { session_id } => {
+            NotifyTrigger::AgentCompleted { session_id: sid } => {
                 info!(
-                    session_id = %session_id,
+                    session_id = %sid,
                     "routing AgentCompleted notification"
                 );
                 self.event_bus
                     .publish_control(ControlEvent::AgentStatusChanged {
-                        session_id: session_id.clone(),
+                        session_id: sid.clone(),
                         status: AgentStatus::Idle,
                     });
+                ("agent_completed".to_string(), "Agent task completed".to_string(), false)
             }
 
-            NotifyTrigger::AgentNeedsApproval { session_id, tool } => {
+            NotifyTrigger::AgentNeedsApproval { session_id: sid, tool } => {
                 info!(
-                    session_id = %session_id,
+                    session_id = %sid,
                     tool = %tool,
                     "routing AgentNeedsApproval notification"
                 );
                 self.event_bus
                     .publish_control(ControlEvent::AgentStatusChanged {
-                        session_id: session_id.clone(),
+                        session_id: sid.clone(),
                         status: AgentStatus::WaitingApproval,
                     });
+                ("agent_needs_approval".to_string(), format!("Agent needs approval for tool: {tool}"), true)
             }
 
-            NotifyTrigger::AgentError { session_id, error } => {
+            NotifyTrigger::AgentError { session_id: sid, error } => {
                 info!(
-                    session_id = %session_id,
+                    session_id = %sid,
                     error = %error,
                     "routing AgentError notification"
                 );
                 self.event_bus
                     .publish_control(ControlEvent::AgentError {
-                        session_id: session_id.clone(),
+                        session_id: sid.clone(),
                         error: error.clone(),
                         class: ErrorClass::Transient,
                     });
+                ("agent_error".to_string(), format!("Agent error: {error}"), true)
             }
-        }
+        };
+
+        // Emit unified NotificationTriggered control event
+        self.event_bus
+            .publish_control(ControlEvent::NotificationTriggered {
+                session_id: session_id.clone(),
+                trigger_type,
+                summary,
+                urgent,
+            });
 
         debug!(
             channels = ?self.config.channels,

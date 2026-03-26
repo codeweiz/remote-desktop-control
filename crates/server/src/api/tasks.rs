@@ -233,6 +233,104 @@ pub async fn approve_task(
     }
 }
 
+// ---------------------------------------------------------------------------
+// PATCH /api/v1/tasks/{id}
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateTaskRequest {
+    /// New priority: "p0", "p1", or "p2".
+    #[serde(default)]
+    pub priority: Option<String>,
+    /// New position in the queue (0-based).
+    #[serde(default)]
+    pub position: Option<usize>,
+}
+
+/// PATCH /api/v1/tasks/{id} — update a task (change priority, reorder).
+pub async fn update_task(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateTaskRequest>,
+) -> impl IntoResponse {
+    // Verify task exists
+    let _task = match state.core.task_pool.get(&id).await {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ErrorBody {
+                    error: format!("task not found: {}", id),
+                }),
+            )
+                .into_response()
+        }
+    };
+
+    // Update priority if provided
+    if let Some(ref priority_str) = body.priority {
+        let new_priority = match priority_str.to_lowercase().as_str() {
+            "p0" => Priority::P0,
+            "p1" => Priority::P1,
+            "p2" => Priority::P2,
+            other => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorBody {
+                        error: format!("invalid priority: {other}. Use p0, p1, or p2"),
+                    }),
+                )
+                    .into_response()
+            }
+        };
+
+        if let Err(e) = state.core.task_pool.update_priority(&id, new_priority).await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorBody {
+                    error: e.to_string(),
+                }),
+            )
+                .into_response();
+        }
+    }
+
+    // Reorder if position is provided
+    if let Some(position) = body.position {
+        if let Err(e) = state.core.task_pool.reorder(&id, position).await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorBody {
+                    error: e.to_string(),
+                }),
+            )
+                .into_response();
+        }
+    }
+
+    // Return the updated task
+    match state.core.task_pool.get(&id).await {
+        Some(t) => Json(TaskInfo {
+            id: t.id,
+            name: t.name,
+            priority: t.priority.to_string(),
+            status: t.status.to_string(),
+            depends_on: t.depends_on,
+            created_at: t.created_at.to_rfc3339(),
+            started_at: t.started_at.map(|dt| dt.to_rfc3339()),
+            completed_at: t.completed_at.map(|dt| dt.to_rfc3339()),
+        })
+            .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody {
+                error: format!("task not found: {}", id),
+            }),
+        )
+            .into_response(),
+    }
+}
+
 /// POST /api/v1/tasks/scheduler/pause — pause the scheduler.
 ///
 /// Note: The actual scheduler pause/resume requires a handle stored in AppState.

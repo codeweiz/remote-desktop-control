@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -221,6 +221,103 @@ pub async fn delete_session(
                 )
                     .into_response()
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Session buffer
+// ---------------------------------------------------------------------------
+
+/// Query parameters for the session buffer endpoint.
+#[derive(Debug, Deserialize)]
+pub struct BufferQuery {
+    /// Only return entries with sequence number greater than this value.
+    pub since_seq: Option<u64>,
+}
+
+/// A single buffer entry returned by the buffer endpoint.
+#[derive(Serialize)]
+pub struct BufferEntry {
+    pub seq: u64,
+    pub data: String,
+}
+
+/// GET /api/v1/sessions/:id/buffer — get session event buffer.
+///
+/// Returns the ring buffer contents, optionally filtered by `since_seq`.
+pub async fn get_session_buffer(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(params): Query<BufferQuery>,
+) -> impl IntoResponse {
+    let session = match state.core.pty_manager.get_session(&id) {
+        Some(s) => s,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ErrorBody {
+                    error: format!("session not found: {}", id),
+                }),
+            )
+                .into_response()
+        }
+    };
+
+    let entries = match params.since_seq {
+        Some(seq) => session.buffer().get_since(seq),
+        None => session.buffer().get_last_n(500), // default: last 500 entries
+    };
+
+    let result: Vec<BufferEntry> = entries
+        .into_iter()
+        .map(|(seq, data)| BufferEntry {
+            seq,
+            data: String::from_utf8_lossy(&data).into_owned(),
+        })
+        .collect();
+
+    Json(result).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Session input (REST alternative to WebSocket)
+// ---------------------------------------------------------------------------
+
+/// Request body for sending input to a session.
+#[derive(Debug, Deserialize)]
+pub struct SessionInputRequest {
+    /// Text input to write to the session's PTY stdin.
+    pub data: String,
+}
+
+/// POST /api/v1/sessions/:id/input — write input to a session's PTY.
+///
+/// This is a REST alternative to the WebSocket terminal connection, useful
+/// for IM commands that need to send text to a session.
+pub async fn send_session_input(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<SessionInputRequest>,
+) -> impl IntoResponse {
+    match state.core.pty_manager.write_input(&id, body.data.as_bytes()) {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "ok" })),
+        )
+            .into_response(),
+        Err(e) => {
+            let msg = e.to_string();
+            let status = if msg.contains("not found") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (
+                status,
+                Json(ErrorBody { error: msg }),
+            )
+                .into_response()
         }
     }
 }

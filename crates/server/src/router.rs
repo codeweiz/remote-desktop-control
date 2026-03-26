@@ -1,13 +1,13 @@
 use axum::{
     middleware,
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
     Json, Router,
 };
 use serde::Serialize;
 
 use crate::{
-    api::{plugins, sessions, status, tasks, token, tunnel},
+    api::{notifications, plugins, sessions, status, tasks, token, tunnel},
     auth::auth_middleware,
     logging::access_log_middleware,
     rate_limit::rate_limit_middleware,
@@ -36,12 +36,17 @@ fn api_routes() -> Router<AppState> {
         .route("/sessions", get(sessions::list_sessions))
         .route("/sessions", post(sessions::create_session))
         .route("/sessions/{id}", delete(sessions::delete_session))
+        .route("/sessions/{id}/buffer", get(sessions::get_session_buffer))
+        .route("/sessions/{id}/input", post(sessions::send_session_input))
+        // Notifications
+        .route("/notifications", get(notifications::list_notifications))
         // Token
         .route("/token/rotate", post(token::rotate_token))
         // Tasks
         .route("/tasks", get(tasks::list_tasks))
         .route("/tasks", post(tasks::add_task))
         .route("/tasks/{id}", delete(tasks::cancel_task))
+        .route("/tasks/{id}", patch(tasks::update_task))
         .route("/tasks/{id}/approve", post(tasks::approve_task))
         .route("/tasks/scheduler/pause", post(tasks::pause_scheduler))
         .route("/tasks/scheduler/resume", post(tasks::resume_scheduler))

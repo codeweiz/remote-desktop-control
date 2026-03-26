@@ -198,13 +198,48 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
         use tokio::sync::RwLock;
 
         rtb_server::state::AppState {
-            core,
+            core: Arc::clone(&core),
             token: Arc::new(RwLock::new(token)),
             rate_limiter,
             blocklist,
             plugin_manager: Some(Arc::clone(&plugin_manager)),
         }
     };
+
+    // Background task: listen for NotificationTriggered control events and
+    // record them in the notification store so that GET /api/v1/notifications works.
+    {
+        let notification_store = Arc::clone(&core.notification_store);
+        let mut control_rx = core.event_bus.subscribe_control();
+        tokio::spawn(async move {
+            loop {
+                match control_rx.recv().await {
+                    Ok(event) => {
+                        if let rtb_core::events::ControlEvent::NotificationTriggered {
+                            session_id,
+                            trigger_type,
+                            summary,
+                            urgent,
+                        } = event.as_ref()
+                        {
+                            notification_store.push(
+                                session_id.clone(),
+                                trigger_type.clone(),
+                                summary.clone(),
+                                *urgent,
+                            );
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(skipped = n, "notification store listener lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        break;
+                    }
+                }
+            }
+        });
+    }
 
     let app = rtb_server::router::create_router(state);
 

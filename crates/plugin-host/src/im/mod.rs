@@ -410,6 +410,49 @@ impl ImBridge {
         }
     }
 
+    /// Subscribe to control events and forward notification triggers to IM.
+    ///
+    /// Spawns a background task that listens for `NotificationTriggered` control
+    /// events and sends them as IM messages to all active channels.
+    pub fn start_notification_listener(&self) {
+        let mut control_rx = self.event_bus.subscribe_control();
+        let outgoing_tx = self.outgoing_tx.clone();
+
+        tokio::spawn(async move {
+            loop {
+                match control_rx.recv().await {
+                    Ok(event) => {
+                        if let ControlEvent::NotificationTriggered {
+                            session_id,
+                            trigger_type,
+                            summary,
+                            urgent,
+                        } = event.as_ref()
+                        {
+                            let urgency = if *urgent { " [URGENT]" } else { "" };
+                            let text = format!(
+                                "[{trigger_type}]{urgency} session={session_id}: {summary}"
+                            );
+                            debug!(text = %text, "forwarding notification to IM");
+                            let _ = outgoing_tx
+                                .send(OutgoingMessage {
+                                    text,
+                                    channel: None, // broadcast to default channel
+                                })
+                                .await;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(skipped = n, "IM notification listener lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
     /// Subscribe to a session's data events and forward PTY output to the IM channel.
     ///
     /// Spawns a background task that reads data events from the session,

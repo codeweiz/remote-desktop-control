@@ -224,6 +224,28 @@ impl TaskPool {
         tasks.iter().find(|t| t.id == id).cloned()
     }
 
+    /// Update the priority of a task.
+    pub async fn update_priority(
+        &self,
+        id: &str,
+        new_priority: Priority,
+    ) -> Result<(), TaskPoolError> {
+        let mut tasks = self.tasks.write().await;
+        let task = tasks
+            .iter_mut()
+            .find(|t| t.id == id)
+            .ok_or_else(|| TaskPoolError::NotFound(id.to_string()))?;
+
+        info!(id = %id, from = %task.priority, to = %new_priority, "updating task priority");
+        task.priority = new_priority;
+        task.updated_at = Utc::now();
+
+        drop(tasks);
+        self.save().await?;
+
+        Ok(())
+    }
+
     /// Reorder tasks by moving a task to a new position.
     pub async fn reorder(&self, id: &str, new_position: usize) -> Result<(), TaskPoolError> {
         let mut tasks = self.tasks.write().await;
