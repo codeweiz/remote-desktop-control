@@ -24,12 +24,12 @@ plugins: ## Build all plugins (feishu, cloudflare-tunnel)
 	cargo build --manifest-path plugins/feishu-plugin/Cargo.toml
 	cargo build --manifest-path plugins/cloudflare-tunnel/Cargo.toml
 
-install-plugins: plugins ## Install plugins to ~/.rtb/plugins/
+install-plugins: plugins ## Install plugins to ~/.rtb/plugins/ (preserves config)
 	@mkdir -p ~/.rtb/plugins/feishu-im ~/.rtb/plugins/cloudflare-tunnel
 	@cp plugins/feishu-plugin/target/debug/feishu-plugin ~/.rtb/plugins/feishu-im/
-	@cp plugins/feishu-plugin/plugin.toml ~/.rtb/plugins/feishu-im/plugin.toml
+	@test -f ~/.rtb/plugins/feishu-im/plugin.toml || cp plugins/feishu-plugin/plugin.toml ~/.rtb/plugins/feishu-im/plugin.toml
 	@cp plugins/cloudflare-tunnel/target/debug/cloudflare-tunnel ~/.rtb/plugins/cloudflare-tunnel/
-	@cp plugins/cloudflare-tunnel/plugin.toml ~/.rtb/plugins/cloudflare-tunnel/plugin.toml
+	@test -f ~/.rtb/plugins/cloudflare-tunnel/plugin.toml || cp plugins/cloudflare-tunnel/plugin.toml ~/.rtb/plugins/cloudflare-tunnel/plugin.toml
 	@echo "Plugins installed to ~/.rtb/plugins/"
 
 # ── Desktop ──────────────────────────────────────────────────
