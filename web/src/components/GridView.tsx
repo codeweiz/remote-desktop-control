@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import {
   Box,
   Paper,
@@ -9,6 +9,7 @@ import {
 } from '@mui/material'
 import {
   Terminal as TerminalIcon,
+  SmartToy as BotIcon,
   Add as AddIcon,
   Delete as DeleteIcon,
   PlayArrow as PlayIcon,
@@ -35,7 +36,8 @@ function SessionCard({
   onFocus: () => void
   onDelete: () => void
 }) {
-  const accentColor = '#34d399'
+  const isAgent = session.kind === 'agent'
+  const accentColor = isAgent ? '#8b5cf6' : '#34d399'
   const statusColor =
     session.status === 'running' ? '#34d399' :
     session.status === 'error' ? '#f87171' : '#94a3b8'
@@ -60,7 +62,11 @@ function SessionCard({
     >
       <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-          <TerminalIcon sx={{ fontSize: 18, color: '#34d399' }} />
+          {isAgent ? (
+            <BotIcon sx={{ fontSize: 18, color: '#8b5cf6' }} />
+          ) : (
+            <TerminalIcon sx={{ fontSize: 18, color: '#34d399' }} />
+          )}
           <Typography
             variant="body2"
             sx={{
@@ -70,7 +76,7 @@ function SessionCard({
               whiteSpace: 'nowrap',
             }}
           >
-            {session.name || `terminal-${session.id.slice(0, 6)}`}
+            {session.name || `${session.kind}-${session.id.slice(0, 6)}`}
           </Typography>
         </Box>
         <IconButton
@@ -95,7 +101,7 @@ function SessionCard({
         <StatusChip label={session.status} color={statusColor} />
         <Chip
           size="small"
-          label="terminal"
+          label={isAgent ? 'agent' : 'terminal'}
           sx={{
             fontSize: 10,
             fontFamily: "'JetBrains Mono', monospace",
@@ -120,9 +126,15 @@ function SessionCard({
           overflow: 'hidden',
         }}
       >
-        <Typography variant="caption" sx={{ color: 'text.secondary', fontStyle: 'italic', fontSize: 10 }}>
-          Click to open terminal...
-        </Typography>
+        {isAgent ? (
+          <Typography variant="caption" sx={{ color: 'text.secondary', fontStyle: 'italic', fontSize: 10 }}>
+            Click to open agent chat...
+          </Typography>
+        ) : (
+          <Typography variant="caption" sx={{ color: 'text.secondary', fontStyle: 'italic', fontSize: 10 }}>
+            Click to open terminal...
+          </Typography>
+        )}
       </Box>
 
       <Typography
@@ -142,7 +154,8 @@ function SessionCard({
   )
 }
 
-function NewSessionCard({ onCreate }: { onCreate: () => void }) {
+function NewSessionCard({ kind, onCreate }: { kind: 'terminal' | 'agent'; onCreate: () => void }) {
+  const isAgent = kind === 'agent'
   return (
     <Paper
       elevation={0}
@@ -160,14 +173,14 @@ function NewSessionCard({ onCreate }: { onCreate: () => void }) {
         justifyContent: 'center',
         minHeight: 140,
         '&:hover': {
-          borderColor: '#34d399',
-          bgcolor: 'rgba(52,211,153,0.05)',
+          borderColor: isAgent ? '#8b5cf6' : '#34d399',
+          bgcolor: isAgent ? 'rgba(139,92,246,0.05)' : 'rgba(52,211,153,0.05)',
         },
       }}
     >
       <AddIcon sx={{ fontSize: 28, color: 'text.secondary', mb: 1 }} />
       <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>
-        New Terminal
+        New {isAgent ? 'Agent' : 'Terminal'}
       </Typography>
     </Paper>
   )
@@ -188,6 +201,14 @@ export function GridView({
     }
   }, [onCreateSession])
 
+  const handleCreateAgent = useCallback(async () => {
+    try {
+      await onCreateSession({ kind: 'agent' })
+    } catch {
+      // handled upstream
+    }
+  }, [onCreateSession])
+
   return (
     <Box sx={{ height: '100%', overflow: 'auto', p: 1.5 }}>
       <Grid container spacing={1.5}>
@@ -202,9 +223,23 @@ export function GridView({
           </Grid>
         ))}
 
-        {/* New terminal card */}
+        {/* Agent sessions */}
+        {tree.agents.map(session => (
+          <Grid size={{ xs: 12, sm: 6, md: 4 }} key={session.id}>
+            <SessionCard
+              session={session}
+              onFocus={() => onFocusSession(session)}
+              onDelete={() => onDeleteSession(session.id)}
+            />
+          </Grid>
+        ))}
+
+        {/* New session cards */}
         <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-          <NewSessionCard onCreate={handleCreateTerminal} />
+          <NewSessionCard kind="terminal" onCreate={handleCreateTerminal} />
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+          <NewSessionCard kind="agent" onCreate={handleCreateAgent} />
         </Grid>
 
         {/* Task Pool card */}
@@ -228,6 +263,12 @@ export function GridView({
                 size="small"
                 icon={<TerminalIcon sx={{ fontSize: 12 }} />}
                 label={`${tree.terminals.length} terminal${tree.terminals.length !== 1 ? 's' : ''}`}
+                sx={{ fontSize: 11 }}
+              />
+              <Chip
+                size="small"
+                icon={<BotIcon sx={{ fontSize: 12 }} />}
+                label={`${tree.agents.length} agent${tree.agents.length !== 1 ? 's' : ''}`}
                 sx={{ fontSize: 11 }}
               />
             </Box>

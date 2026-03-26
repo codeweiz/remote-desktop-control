@@ -106,6 +106,11 @@ impl PtySession {
         cmd.cwd(&working_dir);
 
         let mut child = pair.slave.spawn_command(cmd)?;
+        // CRITICAL: Drop the slave PTY handle after spawning the child process.
+        // The slave must be closed in the parent so that the master reader can
+        // properly receive data from the child. Without this, read() on the
+        // master may block indefinitely or never return data.
+        drop(pair.slave);
         let killer = child.clone_killer();
         let writer = pair.master.take_writer()?;
         let reader = pair.master.try_clone_reader()?;
@@ -202,11 +207,16 @@ impl PtySession {
                             data,
                         };
                         let sid = session_id.clone();
-                        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                            let eb = event_bus.clone();
-                            handle.spawn(async move {
-                                eb.publish_data(&sid, event).await;
-                            });
+                        match tokio::runtime::Handle::try_current() {
+                            Ok(handle) => {
+                                let eb = event_bus.clone();
+                                handle.spawn(async move {
+                                    eb.publish_data(&sid, event).await;
+                                });
+                            }
+                            Err(e) => {
+                                error!(session_id = %session_id, error = %e, "no tokio runtime in spawn_blocking! PTY output will be lost");
+                            }
                         }
                     }
                     Err(e) => {

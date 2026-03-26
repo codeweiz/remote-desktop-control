@@ -23,6 +23,7 @@ export default function App() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [activeSession, setActiveSession] = useState<Session | null>(null)
+  const [agentDrawerOpen, setAgentDrawerOpen] = useState(false)
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false)
 
   // Status WS for latency measurement
@@ -35,17 +36,29 @@ export default function App() {
   const handleFocusSession = useCallback((session: Session) => {
     setActiveSession(session)
     setViewMode('focus')
+    if (session.kind === 'agent') setAgentDrawerOpen(true)
   }, [])
 
   // Back to grid
   const handleBackToGrid = useCallback(() => {
     setViewMode('grid')
+    setAgentDrawerOpen(false)
   }, [])
 
   // Create new terminal
   const handleCreateTerminal = useCallback(async () => {
     try {
       const session = await addSession({ kind: 'terminal' })
+      handleFocusSession(session)
+    } catch {
+      // Error already tracked in useSessions
+    }
+  }, [addSession, handleFocusSession])
+
+  // Create new agent
+  const handleCreateAgent = useCallback(async () => {
+    try {
+      const session = await addSession({ kind: 'agent' })
       handleFocusSession(session)
     } catch {
       // Error already tracked in useSessions
@@ -128,9 +141,11 @@ export default function App() {
           />
         ) : (
           <FocusView
-            sessions={tree.terminals}
+            sessions={[...tree.terminals, ...tree.agents]}
             activeSession={activeSession}
+            agentDrawerOpen={agentDrawerOpen}
             onSelectSession={setActiveSession}
+            onToggleAgent={() => setAgentDrawerOpen(v => !v)}
             onBack={handleBackToGrid}
           />
         )}
@@ -139,6 +154,7 @@ export default function App() {
         open={cmdPaletteOpen}
         onClose={() => setCmdPaletteOpen(false)}
         onNewTerminal={handleCreateTerminal}
+        onNewAgent={handleCreateAgent}
       />
       <NotificationToast onNavigateToSession={handleNavigateToSession} />
     </Box>
