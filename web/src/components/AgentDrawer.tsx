@@ -597,6 +597,20 @@ export function AgentDrawer({ open, session, width, onClose }: AgentDrawerProps)
       ])
       return
     }
+
+    if (msgType === 'user_message') {
+      const source = (msg.source as string) || 'unknown'
+      setMessages(prev => [
+        ...prev,
+        {
+          id: `user-${msg.seq ?? crypto.randomUUID()}`,
+          type: 'user',
+          content: `[${source}] ${(msg.text as string) || ''}`,
+          timestamp: new Date().toISOString(),
+        },
+      ])
+      return
+    }
   }, [])
 
   const { send, connectionState } = useWebSocket({
