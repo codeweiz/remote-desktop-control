@@ -1,7 +1,7 @@
 import type { Session, SessionKind, SessionStatus, SessionCreateRequest, ServerStatus, Task, TaskCreateRequest } from './types'
 
-/** Extract and store auth token from URL or localStorage */
-function initToken(): string | null {
+/** Extract auth token from URL params and persist to localStorage (runs once at load). */
+function initToken(): void {
   const params = new URLSearchParams(window.location.search)
   const urlToken = params.get('token')
   if (urlToken) {
@@ -12,19 +12,18 @@ function initToken(): string | null {
       ? `${window.location.pathname}?${params.toString()}`
       : window.location.pathname
     window.history.replaceState({}, '', newUrl)
-    return urlToken
   }
+}
+
+// Run once to migrate URL token into localStorage
+initToken()
+
+/** Always read token from localStorage so Tauri-injected tokens are picked up. */
+export function getToken(): string | null {
   return localStorage.getItem('rtb_token')
 }
 
-let token = initToken()
-
-export function getToken(): string | null {
-  return token
-}
-
 export function setToken(t: string | null) {
-  token = t
   if (t) {
     localStorage.setItem('rtb_token', t)
   } else {
@@ -38,8 +37,9 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
   }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+  const currentToken = getToken()
+  if (currentToken) {
+    headers['Authorization'] = `Bearer ${currentToken}`
   }
   const res = await fetch(path, { ...options, headers })
   if (!res.ok) {

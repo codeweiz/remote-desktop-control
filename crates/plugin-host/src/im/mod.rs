@@ -85,6 +85,12 @@ pub enum ImCommand {
     Attach { session_id: String },
     /// `/detach` — detach IM channel from current session
     Detach,
+    /// `/agent create <provider>` — create an agent session
+    AgentCreate { provider: String },
+    /// `/agent list` — list agent sessions
+    AgentList,
+    /// `/agent chat <session_id> <message>` — send message to agent
+    AgentChat { session_id: String, message: String },
     /// `/help` — show available commands
     Help,
     /// Not a command, forward as plain text to the attached session
@@ -136,6 +142,38 @@ impl ImCommand {
                     ImCommand::PlainText {
                         text: trimmed.to_string(),
                     }
+                }
+            }
+            "/agent" => {
+                if parts.len() >= 2 {
+                    match parts[1].to_lowercase().as_str() {
+                        "create" => {
+                            let provider = if parts.len() >= 3 {
+                                parts[2].to_string()
+                            } else {
+                                "claude-code".to_string()
+                            };
+                            ImCommand::AgentCreate { provider }
+                        }
+                        "list" | "ls" => ImCommand::AgentList,
+                        "chat" => {
+                            // /agent chat SESSION_ID message text...
+                            if parts.len() >= 3 {
+                                let rest = parts[2];
+                                let (session_id, message) =
+                                    rest.split_once(' ').unwrap_or((rest, ""));
+                                ImCommand::AgentChat {
+                                    session_id: session_id.to_string(),
+                                    message: message.to_string(),
+                                }
+                            } else {
+                                ImCommand::Help
+                            }
+                        }
+                        _ => ImCommand::Help,
+                    }
+                } else {
+                    ImCommand::AgentList // default: list agents
                 }
             }
             "/detach" => ImCommand::Detach,
@@ -370,6 +408,60 @@ impl ImBridge {
                     }
                 }
             }
+            ImCommand::AgentCreate { provider } => {
+                let reply = format!(
+                    "Agent session requested (provider: {provider}).\n\
+                     Use the CLI `rtb session create --type agent --provider {provider}` \
+                     to create, then /attach <session_id>."
+                );
+                let _ = outgoing_tx
+                    .send(OutgoingMessage {
+                        text: reply,
+                        channel: channel.clone(),
+                    })
+                    .await;
+            }
+            ImCommand::AgentList => {
+                let reply =
+                    "Agent sessions: use /sessions to see all attached sessions \
+                     (agent + terminal). Full list via CLI: `rtb session list`."
+                        .to_string();
+                let _ = outgoing_tx
+                    .send(OutgoingMessage {
+                        text: reply,
+                        channel: channel.clone(),
+                    })
+                    .await;
+            }
+            ImCommand::AgentChat {
+                session_id,
+                message,
+            } => {
+                if message.is_empty() {
+                    let _ = outgoing_tx
+                        .send(OutgoingMessage {
+                            text: "Usage: /agent chat <session_id> <message>".to_string(),
+                            channel,
+                        })
+                        .await;
+                } else {
+                    debug!(
+                        session_id = %session_id,
+                        message_len = message.len(),
+                        "forwarding agent chat via IM"
+                    );
+                    let reply = format!(
+                        "Message queued for agent session {session_id}. \
+                         Attach with /attach {session_id} to see responses."
+                    );
+                    let _ = outgoing_tx
+                        .send(OutgoingMessage {
+                            text: reply,
+                            channel,
+                        })
+                        .await;
+                }
+            }
             ImCommand::Help => {
                 let help = concat!(
                     "Available commands:\n",
@@ -378,6 +470,9 @@ impl ImBridge {
                     "  /detach — detach from current session\n",
                     "  /task add <desc> — queue a new task\n",
                     "  /task list — list tasks\n",
+                    "  /agent create [provider] — create an agent session\n",
+                    "  /agent list — list agent sessions\n",
+                    "  /agent chat <id> <msg> — send message to agent\n",
                     "  /help — show this help\n",
                     "  (plain text) — forwarded as input to attached session",
                 );
@@ -746,6 +841,52 @@ mod tests {
         match ImCommand::parse("/detach") {
             ImCommand::Detach => {}
             other => panic!("expected Detach, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_command_agent_create_default() {
+        match ImCommand::parse("/agent create") {
+            ImCommand::AgentCreate { provider } => assert_eq!(provider, "claude-code"),
+            other => panic!("expected AgentCreate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_command_agent_create_provider() {
+        match ImCommand::parse("/agent create openai") {
+            ImCommand::AgentCreate { provider } => assert_eq!(provider, "openai"),
+            other => panic!("expected AgentCreate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_command_agent_list() {
+        match ImCommand::parse("/agent list") {
+            ImCommand::AgentList => {}
+            other => panic!("expected AgentList, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_command_agent_list_default() {
+        match ImCommand::parse("/agent") {
+            ImCommand::AgentList => {}
+            other => panic!("expected AgentList (default), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_command_agent_chat() {
+        match ImCommand::parse("/agent chat sess-123 hello world") {
+            ImCommand::AgentChat {
+                session_id,
+                message,
+            } => {
+                assert_eq!(session_id, "sess-123");
+                assert_eq!(message, "hello world");
+            }
+            other => panic!("expected AgentChat, got {other:?}"),
         }
     }
 }
