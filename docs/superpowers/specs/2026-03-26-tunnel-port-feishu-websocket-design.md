@@ -95,9 +95,15 @@ pub struct FrameHeader {
 }
 ```
 
+#### Mutex Deadlock Fix
+
+The current code at `main.rs:690-693` calls `start_message_listener` while holding the `Mutex<FeishuClient>` lock forever, which would deadlock `send_message`. Fix: change `start_message_listener` to be a **standalone async function** that takes owned copies of `app_id`, `app_secret`, and the `reqwest::Client` — not `&self`. Extract credentials before spawning the listener task, so the Mutex is released immediately.
+
 #### Implementation in `start_message_listener()`
 
-Replace the stub with a connection loop:
+Replace the stub with a standalone async function (not a method on `FeishuClient`). Takes owned `app_id: String`, `app_secret: String`, `http_client: reqwest::Client`, and `tx: mpsc::Sender<JsonRpcNotification>`.
+
+**Note:** The WebSocket endpoint `POST https://open.feishu.cn/callback/ws/endpoint` is at the domain root, NOT under the `/open-apis/` prefix used by other Feishu APIs.
 
 ```
 loop {
@@ -132,20 +138,21 @@ The `im/on_message` notification sent to the host:
         "channel": "<chat_id>",
         "text": "<extracted text content>",
         "sender": "<open_id>",
-        "message_id": "<message_id>",
-        "message_type": "<text|image|post|...>"
+        "timestamp": 1700000000000
     }
 }
 ```
 
-This is already handled by the existing `ImBridge` command parser — no changes needed in plugin-host.
+This matches the existing `ImOnMessageParams` struct in `crates/plugin-host/src/types.rs:95-106` (fields: `text`, `sender`, `channel`, `timestamp`). No changes needed in plugin-host.
+
+Extra Feishu fields (`message_id`, `message_type`) are logged plugin-side for debugging but not sent to the host, keeping the IM interface generic.
 
 #### What Is NOT Implemented
 
 - **Fragment reassembly**: RTB messages are small, won't hit Feishu's fragmentation threshold
 - **Card callbacks**: Not needed for IM use case
 - **Encryption/signature verification**: Long connection mode delivers plaintext events per Feishu docs
-- **Changes to IM Bridge or plugin-host interfaces**: Existing `im/on_message` handling is sufficient
+- **Changes to IM Bridge or plugin-host interfaces**: Notification format matches existing `ImOnMessageParams` exactly
 
 ## Files Changed
 
