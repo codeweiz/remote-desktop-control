@@ -32,25 +32,14 @@ export function useSessions() {
   }, [fetchSessions])
 
   // Subscribe to real-time session events via status WebSocket
+  // Server sends: {"type":"session_created","session_id":"...","session_type":"terminal"}
+  // Rather than parsing partial data, just re-fetch the full session list
   const handleStatusMessage = useCallback((msg: WsMessage) => {
-    const event = msg as unknown as SessionEvent
-    switch (event.type) {
-      case 'session_created':
-        setSessions(prev => {
-          if (prev.some(s => s.id === event.session.id)) return prev
-          return [...prev, event.session]
-        })
-        break
-      case 'session_deleted':
-        setSessions(prev => prev.filter(s => s.id !== event.session.id))
-        break
-      case 'session_updated':
-        setSessions(prev =>
-          prev.map(s => s.id === event.session.id ? event.session : s)
-        )
-        break
+    const type = msg.type as string
+    if (type === 'session_created' || type === 'session_deleted' || type === 'session_updated') {
+      fetchSessions()
     }
-  }, [])
+  }, [fetchSessions])
 
   const { connectionState: statusConnection } = useWebSocket({
     path: '/ws/status',
@@ -59,8 +48,8 @@ export function useSessions() {
 
   // Build a tree: separate terminals and agents, handle parent_id
   const tree: SessionTree = {
-    terminals: sessions.filter(s => s.kind === 'terminal'),
-    agents: sessions.filter(s => s.kind === 'agent'),
+    terminals: sessions.filter(s => s && s.kind === 'terminal'),
+    agents: sessions.filter(s => s && s.kind === 'agent'),
   }
 
   // Actions

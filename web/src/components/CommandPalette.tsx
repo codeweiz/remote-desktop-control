@@ -1,6 +1,22 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Terminal, Bot, Sun, Moon, Search, ArrowRight } from 'lucide-react'
-import type { Theme } from '../lib/types'
+import {
+  Dialog,
+  Box,
+  Typography,
+  InputBase,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Backdrop,
+} from '@mui/material'
+import {
+  Terminal as TerminalIcon,
+  SmartToy as BotIcon,
+  Search as SearchIcon,
+  ArrowForward as ArrowRightIcon,
+  Keyboard as KeyboardIcon,
+} from '@mui/icons-material'
 
 interface CommandAction {
   id: string
@@ -12,21 +28,17 @@ interface CommandAction {
 }
 
 interface CommandPaletteProps {
-  isOpen: boolean
-  theme: Theme
+  open: boolean
   onClose: () => void
   onNewTerminal: () => void
   onNewAgent: () => void
-  onToggleTheme: () => void
 }
 
 export function CommandPalette({
-  isOpen,
-  theme,
+  open,
   onClose,
   onNewTerminal,
   onNewAgent,
-  onToggleTheme,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -37,24 +49,17 @@ export function CommandPalette({
       id: 'new-terminal',
       label: 'New Terminal',
       description: 'Create a new terminal session',
-      icon: <Terminal size={16} />,
+      icon: <TerminalIcon sx={{ fontSize: 18 }} />,
       action: () => { onNewTerminal(); onClose() },
     },
     {
       id: 'new-agent',
       label: 'New Agent',
       description: 'Create a new agent session',
-      icon: <Bot size={16} />,
+      icon: <BotIcon sx={{ fontSize: 18 }} />,
       action: () => { onNewAgent(); onClose() },
     },
-    {
-      id: 'toggle-theme',
-      label: theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-      description: 'Toggle between dark and light themes',
-      icon: theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />,
-      action: () => { onToggleTheme(); onClose() },
-    },
-  ], [theme, onNewTerminal, onNewAgent, onToggleTheme, onClose])
+  ], [onNewTerminal, onNewAgent, onClose])
 
   // Fuzzy filter
   const filtered = useMemo(() => {
@@ -66,23 +71,20 @@ export function CommandPalette({
     )
   }, [actions, query])
 
-  // Reset selection when filtered list changes
   useEffect(() => {
     setSelectedIndex(0)
   }, [filtered.length])
 
-  // Focus input when opened
   useEffect(() => {
-    if (isOpen) {
+    if (open) {
       setQuery('')
       setSelectedIndex(0)
       requestAnimationFrame(() => {
         inputRef.current?.focus()
       })
     }
-  }, [isOpen])
+  }, [open])
 
-  // Keyboard handler
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     switch (e.key) {
       case 'ArrowDown':
@@ -106,72 +108,126 @@ export function CommandPalette({
     }
   }, [filtered, selectedIndex, onClose])
 
-  if (!isOpen) return null
-
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center pt-[20vh]"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      slots={{ backdrop: Backdrop }}
+      slotProps={{
+        backdrop: {
+          sx: { backdropFilter: 'blur(8px)', bgcolor: 'rgba(0,0,0,0.5)' },
+        },
+      }}
+      PaperProps={{
+        sx: {
+          position: 'absolute',
+          top: '20vh',
+          m: 0,
+          borderRadius: 2,
+          maxWidth: 500,
+          overflow: 'hidden',
+        },
       }}
     >
-      <div className="w-[500px] max-w-[90vw] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-2xl overflow-hidden animate-fade-in">
-        {/* Search input */}
-        <div className="flex items-center gap-2 border-b border-[var(--border-color)]">
-          <div className="pl-4">
-            <Search size={16} className="text-[var(--text-muted)] shrink-0" />
-          </div>
-          <input
-            ref={inputRef}
-            type="text"
-            className="flex-1 w-full bg-transparent px-2 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
-            placeholder="Type a command..."
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-          />
-          <kbd className="text-[10px] font-mono bg-[var(--bg-primary)] px-1.5 py-0.5 rounded text-[var(--text-muted)] mr-3">
-            ESC
-          </kbd>
-        </div>
+      {/* Search input */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1.5,
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+          px: 2,
+        }}
+      >
+        <SearchIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+        <InputBase
+          inputRef={inputRef}
+          fullWidth
+          placeholder="Type a command..."
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={handleKeyDown}
+          sx={{
+            py: 1.5,
+            fontSize: 14,
+          }}
+        />
+        <Box
+          component="kbd"
+          sx={{
+            fontSize: 10,
+            fontFamily: "'JetBrains Mono', monospace",
+            bgcolor: 'rgba(255,255,255,0.05)',
+            px: 1,
+            py: 0.25,
+            borderRadius: 0.5,
+            color: 'text.secondary',
+            flexShrink: 0,
+          }}
+        >
+          ESC
+        </Box>
+      </Box>
 
-        {/* Results */}
-        <div className="max-h-[300px] overflow-y-auto py-1">
-          {filtered.length === 0 ? (
-            <div className="px-4 py-6 text-center text-sm text-[var(--text-muted)]">
+      {/* Results */}
+      <List sx={{ maxHeight: 300, overflow: 'auto', py: 0.5 }}>
+        {filtered.length === 0 ? (
+          <Box sx={{ px: 3, py: 4, textAlign: 'center' }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
               No matching commands
-            </div>
-          ) : (
-            filtered.map((action, index) => (
-              <div
-                key={action.id}
-                className={`
-                  flex items-center gap-3 px-4 py-2 text-sm cursor-pointer transition-colors duration-150
-                  ${index === selectedIndex ? 'bg-[var(--bg-elevated)]' : 'hover:bg-[var(--bg-elevated)]'}
-                `}
-                onClick={() => action.action()}
-                onMouseEnter={() => setSelectedIndex(index)}
-              >
-                <span className="text-[var(--text-muted)]">{action.icon}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-[var(--text-primary)]">{action.label}</div>
-                  {action.description && (
-                    <div className="text-[11px] text-[var(--text-muted)] truncate">{action.description}</div>
-                  )}
-                </div>
-                {action.shortcut && (
-                  <span className="text-[10px] font-mono bg-[var(--bg-primary)] px-1.5 py-0.5 rounded text-[var(--text-muted)]">
-                    {action.shortcut}
-                  </span>
-                )}
-                {index === selectedIndex && (
-                  <ArrowRight size={14} className="text-[var(--text-muted)] shrink-0" />
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </div>
+            </Typography>
+          </Box>
+        ) : (
+          filtered.map((action, index) => (
+            <ListItemButton
+              key={action.id}
+              selected={index === selectedIndex}
+              onClick={() => action.action()}
+              onMouseEnter={() => setSelectedIndex(index)}
+              sx={{
+                py: 1,
+                px: 2,
+                '&.Mui-selected': {
+                  bgcolor: 'rgba(255,255,255,0.05)',
+                },
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 36, color: 'text.secondary' }}>
+                {action.icon}
+              </ListItemIcon>
+              <ListItemText
+                primary={action.label}
+                secondary={action.description}
+                primaryTypographyProps={{ fontSize: 13, fontWeight: 500 }}
+                secondaryTypographyProps={{ fontSize: 11 }}
+              />
+              {action.shortcut && (
+                <Box
+                  component="kbd"
+                  sx={{
+                    fontSize: 10,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    bgcolor: 'rgba(255,255,255,0.05)',
+                    px: 1,
+                    py: 0.25,
+                    borderRadius: 0.5,
+                    color: 'text.secondary',
+                    ml: 1,
+                  }}
+                >
+                  {action.shortcut}
+                </Box>
+              )}
+              {index === selectedIndex && (
+                <ArrowRightIcon sx={{ fontSize: 16, color: 'text.secondary', ml: 1 }} />
+              )}
+            </ListItemButton>
+          ))
+        )}
+      </List>
+    </Dialog>
   )
 }

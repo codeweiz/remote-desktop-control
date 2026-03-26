@@ -1,88 +1,23 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-:root {
-  /* Dark theme (default) */
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-tertiary: #283548;
-  --bg-elevated: #334155;
-  --bg-hover: #1e293b;
-  --border-color: #334155;
-  --border-subtle: #1e293b;
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --accent-green: #4ade80;
-  --accent-blue: #3b82f6;
-  --accent-purple: #c084fc;
-  --accent-amber: #fbbf24;
-  --accent-orange: #fbbf24;
-  --accent-red: #f87171;
-  --accent-cyan: #22d3ee;
-  --scrollbar-thumb: #334155;
-  --scrollbar-hover: #475569;
-}
-
-.light {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f1f5f9;
-  --bg-tertiary: #e8ecf1;
-  --bg-elevated: #e2e8f0;
-  --bg-hover: #f1f5f9;
-  --border-color: #e2e8f0;
-  --border-subtle: #f1f5f9;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
-  --scrollbar-thumb: #cbd5e1;
-  --scrollbar-hover: #94a3b8;
-}
-
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-
-*::-webkit-scrollbar { width: 6px; height: 6px; }
-*::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: 3px;
-}
-*::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
-
-body {
-  margin: 0;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  overflow: hidden;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-}
-
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; }
 #root { height: 100vh; height: 100dvh; width: 100vw; }
 
-/* xterm.js container styles */
-.xterm-container {
-  width: 100%;
-  height: 100%;
+/* Terminal area — MUI doesn't style this */
+.terminal-container .xterm { height: 100%; }
+.terminal-container .xterm-viewport::-webkit-scrollbar { width: 6px; }
+.terminal-container .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.15);
+  border-radius: 3px;
 }
 
-.xterm-container .xterm {
-  height: 100%;
-  padding: 4px;
-}
-
-/* Command palette overlay */
-.command-palette-overlay {
-  backdrop-filter: blur(8px);
-  background: rgba(0, 0, 0, 0.5);
-}
+/* Glassmorphism utilities */
+.glass { backdrop-filter: blur(12px); background: rgba(15,23,42,0.7); border: 1px solid rgba(255,255,255,0.07); }
+.glass-heavy { backdrop-filter: blur(24px); background: rgba(15,23,42,0.85); }
+.glow-green { box-shadow: 0 0 8px rgba(52,211,153,0.4); }
+.glow-purple { box-shadow: 0 0 8px rgba(139,92,246,0.4); }
+.glow-blue { box-shadow: 0 0 8px rgba(59,130,246,0.3); }
 
 /* Markdown content styling */
 .markdown-content h1,
@@ -98,7 +33,7 @@ body {
 }
 
 .markdown-content code {
-  background: var(--bg-elevated);
+  background: rgba(51, 65, 85, 0.5);
   padding: 0.125em 0.25em;
   border-radius: 3px;
   font-size: 0.875em;
@@ -106,7 +41,7 @@ body {
 }
 
 .markdown-content pre {
-  background: var(--bg-elevated);
+  background: rgba(51, 65, 85, 0.5);
   padding: 0.75em;
   border-radius: 6px;
   overflow-x: auto;
@@ -124,45 +59,25 @@ body {
   margin-bottom: 0.5em;
 }
 
-/* Utility animations */
-@keyframes pulse-dot {
+@keyframes pulse-glow {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
+.animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
 
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
 
 @keyframes slide-in-right {
   from { transform: translateX(8px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
-
-@keyframes slide-in {
-  from {
-    opacity: 0;
-    transform: translateX(100%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
-.animate-fade-in { animation: fade-in 0.2s ease-out; }
 .animate-slide-in { animation: slide-in-right 0.15s ease-out; }
 
 /* Safe area for mobile bottom navigation */
 .safe-area-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0);
-}
-
-/* Mobile: hide scrollbar on tab bar */
-@media (max-width: 767px) {
-  .overflow-x-auto::-webkit-scrollbar {
-    display: none;
-  }
 }

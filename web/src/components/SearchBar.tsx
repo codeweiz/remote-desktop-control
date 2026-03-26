@@ -1,5 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, ChevronUp, ChevronDown, Search } from 'lucide-react'
+import { Box, Paper, IconButton, InputBase } from '@mui/material'
+import {
+  Close as CloseIcon,
+  KeyboardArrowUp as ChevronUpIcon,
+  KeyboardArrowDown as ChevronDownIcon,
+  Search as SearchIcon,
+} from '@mui/icons-material'
 
 interface SearchBarProps {
   isVisible: boolean
@@ -46,38 +52,48 @@ export function SearchBar({ isVisible, onClose, onFindNext, onFindPrevious }: Se
   if (!isVisible) return null
 
   return (
-    <div className="absolute top-0 right-0 z-20 flex items-center gap-1 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-bl-md px-2 py-1.5 shadow-lg animate-slide-in">
-      <Search size={12} className="text-[var(--text-muted)] shrink-0" />
-      <input
-        ref={inputRef}
-        type="text"
-        className="w-48 bg-[var(--bg-elevated)] text-xs text-[var(--text-primary)] rounded-md px-2 py-1 outline-none border border-transparent focus:border-[var(--accent-blue)] transition-colors duration-150 placeholder:text-[var(--text-muted)]"
+    <Paper
+      elevation={4}
+      sx={{
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        zIndex: 20,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 0.5,
+        px: 1,
+        py: 0.75,
+        borderBottomLeftRadius: 8,
+        borderTopLeftRadius: 0,
+        borderTopRightRadius: 0,
+        borderBottomRightRadius: 0,
+      }}
+      className="animate-slide-in"
+    >
+      <SearchIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+      <InputBase
+        inputRef={inputRef}
+        size="small"
         placeholder="Search terminal..."
         value={query}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
+        sx={{
+          fontSize: 12,
+          width: 180,
+          '& input': { py: 0.25, px: 0.5 },
+        }}
       />
-      <button
-        className="p-0.5 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
-        onClick={() => onFindPrevious(query)}
-        title="Previous (Shift+Enter)"
-      >
-        <ChevronUp size={14} />
-      </button>
-      <button
-        className="p-0.5 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
-        onClick={() => onFindNext(query)}
-        title="Next (Enter)"
-      >
-        <ChevronDown size={14} />
-      </button>
-      <button
-        className="p-0.5 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
-        onClick={onClose}
-        title="Close (Esc)"
-      >
-        <X size={14} />
-      </button>
-    </div>
+      <IconButton size="small" onClick={() => onFindPrevious(query)} title="Previous (Shift+Enter)" sx={{ p: 0.25 }}>
+        <ChevronUpIcon sx={{ fontSize: 16 }} />
+      </IconButton>
+      <IconButton size="small" onClick={() => onFindNext(query)} title="Next (Enter)" sx={{ p: 0.25 }}>
+        <ChevronDownIcon sx={{ fontSize: 16 }} />
+      </IconButton>
+      <IconButton size="small" onClick={onClose} title="Close (Esc)" sx={{ p: 0.25 }}>
+        <CloseIcon sx={{ fontSize: 16 }} />
+      </IconButton>
+    </Paper>
   )
 }

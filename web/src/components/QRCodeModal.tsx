@@ -1,5 +1,17 @@
 import { useState, useEffect } from 'react'
-import { X, Copy, Check } from 'lucide-react'
+import {
+  Dialog,
+  Box,
+  Typography,
+  IconButton,
+  Paper,
+  Backdrop,
+} from '@mui/material'
+import {
+  Close as CloseIcon,
+  ContentCopy as CopyIcon,
+  Check as CheckIcon,
+} from '@mui/icons-material'
 import QRCode from 'qrcode'
 import { getToken } from '../lib/api'
 
@@ -41,60 +53,128 @@ export function QRCodeModal({ isOpen, onClose }: QRCodeModalProps) {
     })
   }
 
-  if (!isOpen) return null
-
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
+    <Dialog
+      open={isOpen}
+      onClose={onClose}
+      maxWidth="xs"
+      fullWidth
+      slots={{ backdrop: Backdrop }}
+      slotProps={{
+        backdrop: {
+          sx: { backdropFilter: 'blur(8px)', bgcolor: 'rgba(0,0,0,0.5)' },
+        },
+      }}
+      PaperProps={{
+        sx: {
+          borderRadius: 2,
+          maxWidth: 340,
+          overflow: 'hidden',
+        },
       }}
     >
-      <div className="w-[320px] max-w-[90vw] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-2xl overflow-hidden animate-fade-in">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)]">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">Connect via QR Code</h2>
-          <button
-            onClick={onClose}
-            className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
+      {/* Header */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          px: 2.5,
+          py: 1.5,
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+        }}
+      >
+        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+          Connect via QR Code
+        </Typography>
+        <IconButton size="small" onClick={onClose}>
+          <CloseIcon sx={{ fontSize: 18 }} />
+        </IconButton>
+      </Box>
+
+      {/* QR Code */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', p: 3 }}>
+        {svgData ? (
+          <Box
+            sx={{
+              bgcolor: 'rgba(255,255,255,0.05)',
+              borderRadius: 2,
+              p: 2,
+            }}
+            dangerouslySetInnerHTML={{ __html: svgData }}
+          />
+        ) : (
+          <Box
+            sx={{
+              width: 220,
+              height: 220,
+              bgcolor: 'rgba(255,255,255,0.05)',
+              borderRadius: 2,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
           >
-            <X size={16} />
-          </button>
-        </div>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              Generating...
+            </Typography>
+          </Box>
+        )}
 
-        {/* QR Code */}
-        <div className="flex flex-col items-center p-6">
-          {svgData ? (
-            <div
-              className="bg-[var(--bg-elevated)] rounded-lg p-4"
-              dangerouslySetInnerHTML={{ __html: svgData }}
-            />
-          ) : (
-            <div className="w-[220px] h-[220px] bg-[var(--bg-elevated)] rounded-lg flex items-center justify-center">
-              <span className="text-xs text-[var(--text-muted)]">Generating...</span>
-            </div>
-          )}
+        <Typography
+          variant="caption"
+          sx={{
+            mt: 2,
+            textAlign: 'center',
+            maxWidth: 240,
+            color: 'text.secondary',
+            fontSize: 11,
+          }}
+        >
+          Scan this QR code with the RTB mobile app to connect to this server
+        </Typography>
 
-          <p className="text-[10px] text-[var(--text-muted)] mt-4 text-center max-w-[240px]">
-            Scan this QR code with the RTB mobile app to connect to this server
-          </p>
-
-          {/* Deep link URL */}
-          <div className="mt-3 w-full">
-            <div className="flex items-center gap-1 bg-[var(--bg-elevated)] rounded-md px-3 py-2 border border-[var(--border-color)]">
-              <code className="text-[10px] font-mono text-[var(--text-muted)] flex-1 truncate">{deepLink}</code>
-              <button
-                onClick={handleCopy}
-                className="shrink-0 p-1 rounded-md hover:bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
-                title="Copy link"
-              >
-                {copied ? <Check size={12} className="text-[var(--accent-green)]" /> : <Copy size={12} />}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+        {/* Deep link URL */}
+        <Box
+          sx={{
+            mt: 2,
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.5,
+            bgcolor: 'rgba(255,255,255,0.05)',
+            borderRadius: 1,
+            px: 1.5,
+            py: 1,
+            border: '1px solid',
+            borderColor: 'divider',
+          }}
+        >
+          <Typography
+            variant="caption"
+            sx={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: 10,
+              color: 'text.secondary',
+              flex: 1,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {deepLink}
+          </Typography>
+          <IconButton size="small" onClick={handleCopy} title="Copy link" sx={{ p: 0.5, flexShrink: 0 }}>
+            {copied ? (
+              <CheckIcon sx={{ fontSize: 14, color: 'success.main' }} />
+            ) : (
+              <CopyIcon sx={{ fontSize: 14 }} />
+            )}
+          </IconButton>
+        </Box>
+      </Box>
+    </Dialog>
   )
 }
 

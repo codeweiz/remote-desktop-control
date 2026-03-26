@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { X, Bot, ListTodo, Terminal, AlertCircle } from 'lucide-react'
+import { Box, Snackbar, Alert, Typography, IconButton } from '@mui/material'
+import {
+  SmartToy as BotIcon,
+  Checklist as TaskIcon,
+  Terminal as TerminalIcon,
+  Info as SystemIcon,
+  Close as CloseIcon,
+} from '@mui/icons-material'
 import type { NotificationEvent, WsMessage } from '../lib/types'
 import { useWebSocket } from '../hooks/useWebSocket'
 
@@ -10,10 +17,10 @@ interface ToastItem {
 
 function triggerIcon(trigger: NotificationEvent['trigger']) {
   switch (trigger) {
-    case 'agent': return <Bot size={14} className="text-[var(--accent-purple)]" />
-    case 'task': return <ListTodo size={14} className="text-[var(--accent-amber)]" />
-    case 'session': return <Terminal size={14} className="text-[var(--accent-green)]" />
-    case 'system': return <AlertCircle size={14} className="text-[var(--accent-cyan)]" />
+    case 'agent': return <BotIcon sx={{ fontSize: 16, color: '#8b5cf6' }} />
+    case 'task': return <TaskIcon sx={{ fontSize: 16, color: '#fbbf24' }} />
+    case 'session': return <TerminalIcon sx={{ fontSize: 16, color: '#34d399' }} />
+    case 'system': return <SystemIcon sx={{ fontSize: 16, color: '#22d3ee' }} />
   }
 }
 
@@ -25,7 +32,6 @@ export function NotificationToast({ onNavigateToSession }: NotificationToastProp
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Clean up expired toasts
   useEffect(() => {
     timerRef.current = setInterval(() => {
       const now = Date.now()
@@ -51,7 +57,7 @@ export function NotificationToast({ onNavigateToSession }: NotificationToastProp
         timestamp: (msg.timestamp as string) || new Date().toISOString(),
       }
       setToasts(prev => [
-        ...prev.slice(-4), // Keep max 5 toasts
+        ...prev.slice(-4),
         { notification, expiresAt: Date.now() + 5000 },
       ])
     }
@@ -69,36 +75,71 @@ export function NotificationToast({ onNavigateToSession }: NotificationToastProp
   if (toasts.length === 0) return null
 
   return (
-    <div className="fixed top-12 right-4 z-[90] flex flex-col gap-2 max-w-[320px]">
+    <Box
+      sx={{
+        position: 'fixed',
+        top: 64,
+        right: 16,
+        zIndex: 1400,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 1,
+        maxWidth: 320,
+      }}
+    >
       {toasts.map(toast => (
-        <div
+        <Alert
           key={toast.notification.id}
-          className="flex items-start gap-2 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded-lg px-3 py-2.5 shadow-xl animate-slide-in cursor-pointer hover:bg-[var(--bg-secondary)] transition-colors duration-150"
+          severity="info"
+          icon={triggerIcon(toast.notification.trigger)}
+          action={
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation()
+                dismissToast(toast.notification.id)
+              }}
+            >
+              <CloseIcon sx={{ fontSize: 14 }} />
+            </IconButton>
+          }
           onClick={() => {
             if (toast.notification.session_id && onNavigateToSession) {
               onNavigateToSession(toast.notification.session_id)
             }
             dismissToast(toast.notification.id)
           }}
+          sx={{
+            cursor: 'pointer',
+            backdropFilter: 'blur(12px)',
+            bgcolor: 'rgba(15, 23, 42, 0.9)',
+            border: '1px solid',
+            borderColor: 'divider',
+            '&:hover': {
+              bgcolor: 'rgba(15, 23, 42, 0.95)',
+            },
+          }}
+          className="animate-slide-in"
         >
-          <span className="shrink-0 mt-0.5">{triggerIcon(toast.notification.trigger)}</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-[var(--text-primary)]">{toast.notification.summary}</p>
-            {toast.notification.session_name && (
-              <p className="text-[10px] text-[var(--text-muted)] mt-0.5 font-mono">{toast.notification.session_name}</p>
-            )}
-          </div>
-          <button
-            className="shrink-0 p-0.5 rounded-md hover:bg-[var(--bg-primary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation()
-              dismissToast(toast.notification.id)
-            }}
-          >
-            <X size={12} />
-          </button>
-        </div>
+          <Typography variant="caption" sx={{ fontSize: 12 }}>
+            {toast.notification.summary}
+          </Typography>
+          {toast.notification.session_name && (
+            <Typography
+              variant="caption"
+              sx={{
+                display: 'block',
+                fontSize: 10,
+                fontFamily: "'JetBrains Mono', monospace",
+                color: 'text.secondary',
+                mt: 0.25,
+              }}
+            >
+              {toast.notification.session_name}
+            </Typography>
+          )}
+        </Alert>
       ))}
-    </div>
+    </Box>
   )
 }

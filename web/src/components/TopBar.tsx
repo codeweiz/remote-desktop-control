@@ -1,94 +1,157 @@
 import { useState } from 'react'
-import { Sun, Moon, Settings, Wifi, WifiOff, QrCode, Menu, Hexagon } from 'lucide-react'
-import type { ConnectionState, Theme } from '../lib/types'
+import {
+  Box,
+  Paper,
+  IconButton,
+  Chip,
+  ToggleButtonGroup,
+  ToggleButton,
+  Tooltip,
+  Typography,
+} from '@mui/material'
+import {
+  GridView as GridViewIcon,
+  ViewStream as FocusIcon,
+  Search as SearchIcon,
+  QrCode2 as QrCodeIcon,
+  Hexagon as HexagonIcon,
+  WifiOff as WifiOffIcon,
+} from '@mui/icons-material'
+import type { ConnectionState } from '../lib/types'
 import { QRCodeModal } from './QRCodeModal'
 
 interface TopBarProps {
+  viewMode: 'grid' | 'focus'
   connectionState: ConnectionState
   latency: number | null
-  theme: Theme
-  onToggleTheme: () => void
-  onOpenSettings: () => void
-  onToggleSidebar?: () => void
+  onToggleView: () => void
+  onOpenCommandPalette: () => void
 }
 
 export function TopBar({
+  viewMode,
   connectionState,
   latency,
-  theme,
-  onToggleTheme,
-  onOpenSettings,
-  onToggleSidebar,
+  onToggleView,
+  onOpenCommandPalette,
 }: TopBarProps) {
   const isConnected = connectionState === 'connected'
   const [qrOpen, setQrOpen] = useState(false)
 
   return (
-    <div className="h-10 flex items-center justify-between px-3 bg-[var(--bg-secondary)] border-b border-[var(--border-color)] shrink-0 select-none">
-      {/* Left: Logo + Mobile hamburger */}
-      <div className="flex items-center gap-2.5">
-        {onToggleSidebar && (
-          <button
-            onClick={onToggleSidebar}
-            className="md:hidden w-8 h-8 flex items-center justify-center rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
+    <Paper
+      elevation={3}
+      sx={{
+        mx: 1,
+        mt: 1,
+        borderRadius: 3,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        px: 2,
+        py: 0.75,
+        minHeight: 48,
+        flexShrink: 0,
+      }}
+    >
+      {/* Left: Logo + Connection status */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+          <HexagonIcon sx={{ fontSize: 18, color: 'success.main' }} />
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, fontSize: 14 }}>
+            RTB
+          </Typography>
+          <Typography
+            variant="caption"
+            sx={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: 10,
+              color: 'text.secondary',
+            }}
           >
-            <Menu size={16} />
-          </button>
-        )}
-        <div className="flex items-center gap-1.5">
-          <Hexagon size={16} className="text-[var(--accent-green)]" />
-          <span className="font-semibold text-sm text-[var(--text-primary)]">RTB</span>
-          <span className="text-[10px] font-mono text-[var(--text-muted)]">2.0</span>
-        </div>
+            2.0
+          </Typography>
+        </Box>
 
-        {/* Connection status */}
-        <div className="flex items-center gap-1.5 ml-2 px-2 py-1 rounded-md bg-[var(--bg-primary)]">
-          {isConnected ? (
-            <>
-              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)] animate-pulse-dot" />
-              <span className="text-[11px] text-[var(--accent-green)] font-medium">Connected</span>
-            </>
-          ) : (
-            <>
-              <WifiOff size={12} className="text-[var(--accent-red)]" />
-              <span className="text-[11px] text-[var(--accent-red)] font-medium">
-                {connectionState === 'connecting' ? 'Connecting...' : 'Disconnected'}
-              </span>
-            </>
-          )}
-          {latency !== null && isConnected && (
-            <span className="text-[11px] font-mono text-[var(--text-muted)] ml-0.5">{latency}ms</span>
-          )}
-        </div>
-      </div>
+        <Chip
+          size="small"
+          icon={
+            isConnected ? (
+              <Box
+                sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  bgcolor: 'success.main',
+                  boxShadow: '0 0 6px rgba(52,211,153,0.6)',
+                  animation: 'pulse-glow 2s ease-in-out infinite',
+                }}
+              />
+            ) : (
+              <WifiOffIcon sx={{ fontSize: 12 }} />
+            )
+          }
+          label={
+            isConnected
+              ? `Connected${latency !== null ? ` ${latency}ms` : ''}`
+              : connectionState === 'connecting'
+                ? 'Connecting...'
+                : 'Disconnected'
+          }
+          sx={{
+            bgcolor: isConnected
+              ? 'rgba(52,211,153,0.1)'
+              : 'rgba(248,113,113,0.1)',
+            color: isConnected ? 'success.main' : 'error.main',
+            fontSize: 11,
+            fontWeight: 500,
+            '& .MuiChip-icon': { ml: 0.5 },
+          }}
+        />
+      </Box>
+
+      {/* Center: View mode toggle */}
+      <ToggleButtonGroup
+        value={viewMode}
+        exclusive
+        onChange={onToggleView}
+        size="small"
+        sx={{
+          '& .MuiToggleButton-root': {
+            px: 1.5,
+            py: 0.5,
+            fontSize: 12,
+            textTransform: 'none',
+            border: '1px solid',
+            borderColor: 'divider',
+          },
+        }}
+      >
+        <ToggleButton value="grid">
+          <GridViewIcon sx={{ fontSize: 16, mr: 0.5 }} />
+          Grid
+        </ToggleButton>
+        <ToggleButton value="focus">
+          <FocusIcon sx={{ fontSize: 16, mr: 0.5 }} />
+          Focus
+        </ToggleButton>
+      </ToggleButtonGroup>
 
       {/* Right: Actions */}
-      <div className="flex items-center gap-0.5">
-        <button
-          onClick={onToggleTheme}
-          className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]/50"
-          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-        >
-          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-        </button>
-        <button
-          onClick={() => setQrOpen(true)}
-          className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]/50"
-          title="QR Code"
-        >
-          <QrCode size={15} />
-        </button>
-        <button
-          onClick={onOpenSettings}
-          className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]/50"
-          title="Settings"
-        >
-          <Settings size={15} />
-        </button>
-      </div>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Tooltip title="Search (Cmd+K)">
+          <IconButton size="small" onClick={onOpenCommandPalette}>
+            <SearchIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="QR Code">
+          <IconButton size="small" onClick={() => setQrOpen(true)}>
+            <QrCodeIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Tooltip>
+      </Box>
 
-      {/* QR Code Modal */}
       <QRCodeModal isOpen={qrOpen} onClose={() => setQrOpen(false)} />
-    </div>
+    </Paper>
   )
 }

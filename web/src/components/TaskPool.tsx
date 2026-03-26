@@ -1,32 +1,42 @@
 import { useState, useCallback } from 'react'
 import {
-  ChevronDown,
-  ChevronUp,
-  Plus,
-  CheckCircle,
-  XCircle,
-  ListTodo,
-  RefreshCw,
-} from 'lucide-react'
+  Box,
+  Typography,
+  IconButton,
+  Chip,
+  Collapse,
+  TextField,
+  Button,
+  Divider,
+} from '@mui/material'
+import {
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  Add as AddIcon,
+  CheckCircle as CheckCircleIcon,
+  Cancel as CancelIcon,
+  Checklist as TaskListIcon,
+  Refresh as RefreshIcon,
+} from '@mui/icons-material'
 import type { Task, TaskPriority, TaskStatus } from '../lib/types'
 import { useTaskPool } from '../hooks/useTaskPool'
 
 function priorityColor(priority: TaskPriority): string {
   switch (priority) {
-    case 'P0': return 'bg-red-500/20 text-red-400'
-    case 'P1': return 'bg-amber-500/20 text-amber-400'
-    case 'P2': return 'bg-green-500/20 text-green-400'
-    case 'P3': return 'bg-blue-500/20 text-blue-400'
+    case 'P0': return '#f87171'
+    case 'P1': return '#fbbf24'
+    case 'P2': return '#34d399'
+    case 'P3': return '#3b82f6'
   }
 }
 
 function statusColor(status: TaskStatus): string {
   switch (status) {
-    case 'Pending': return 'bg-[var(--bg-elevated)] text-[var(--text-muted)]'
-    case 'InProgress': return 'bg-blue-500/20 text-blue-400'
-    case 'NeedsReview': return 'bg-amber-500/20 text-amber-400'
-    case 'Completed': return 'bg-green-500/20 text-green-400'
-    case 'Cancelled': return 'bg-[var(--bg-elevated)] text-[var(--text-muted)] line-through'
+    case 'Pending': return '#94a3b8'
+    case 'InProgress': return '#3b82f6'
+    case 'NeedsReview': return '#fbbf24'
+    case 'Completed': return '#34d399'
+    case 'Cancelled': return '#64748b'
   }
 }
 
@@ -39,40 +49,86 @@ function TaskItem({
   onApprove: () => void
   onCancel: () => void
 }) {
+  const pColor = priorityColor(task.priority)
+  const sColor = statusColor(task.status)
+
   return (
-    <div className="group flex items-start gap-2 px-3 py-1.5 hover:bg-[var(--bg-hover)] transition-colors duration-150">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className={`w-5 h-5 rounded text-[10px] font-bold flex items-center justify-center shrink-0 ${priorityColor(task.priority)}`}>
-            {task.priority}
-          </span>
-          <span className="text-xs text-[var(--text-primary)] truncate">{task.title}</span>
-        </div>
-        <span className={`text-[10px] font-mono px-1 py-0.5 rounded mt-0.5 inline-block ${statusColor(task.status)}`}>
-          {task.status}
-        </span>
-      </div>
-      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0">
-        {task.status === 'NeedsReview' && (
-          <button
-            onClick={onApprove}
-            className="p-0.5 rounded hover:bg-green-500/20 text-green-400 transition-colors duration-150 cursor-pointer"
-            title="Approve"
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 1,
+        px: 1.5,
+        py: 0.75,
+        '&:hover': { bgcolor: 'rgba(255,255,255,0.03)' },
+        '&:hover .task-actions': { opacity: 1 },
+        transition: 'background-color 0.15s',
+      }}
+    >
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+          <Chip
+            size="small"
+            label={task.priority}
+            sx={{
+              height: 18,
+              fontSize: 9,
+              fontWeight: 700,
+              bgcolor: `${pColor}20`,
+              color: pColor,
+              '& .MuiChip-label': { px: 0.75 },
+            }}
+          />
+          <Typography
+            variant="caption"
+            sx={{
+              fontSize: 11,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
           >
-            <CheckCircle size={12} />
-          </button>
+            {task.title}
+          </Typography>
+        </Box>
+        <Chip
+          size="small"
+          label={task.status}
+          sx={{
+            mt: 0.25,
+            height: 16,
+            fontSize: 9,
+            fontFamily: "'JetBrains Mono', monospace",
+            bgcolor: `${sColor}20`,
+            color: sColor,
+            '& .MuiChip-label': { px: 0.5 },
+            textDecoration: task.status === 'Cancelled' ? 'line-through' : 'none',
+          }}
+        />
+      </Box>
+      <Box
+        className="task-actions"
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.25,
+          opacity: 0,
+          transition: 'opacity 0.15s',
+          flexShrink: 0,
+        }}
+      >
+        {task.status === 'NeedsReview' && (
+          <IconButton size="small" onClick={onApprove} title="Approve" sx={{ p: 0.25 }}>
+            <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main' }} />
+          </IconButton>
         )}
         {task.status !== 'Completed' && task.status !== 'Cancelled' && (
-          <button
-            onClick={onCancel}
-            className="p-0.5 rounded hover:bg-red-500/20 text-red-400 transition-colors duration-150 cursor-pointer"
-            title="Cancel"
-          >
-            <XCircle size={12} />
-          </button>
+          <IconButton size="small" onClick={onCancel} title="Cancel" sx={{ p: 0.25 }}>
+            <CancelIcon sx={{ fontSize: 14, color: 'error.main' }} />
+          </IconButton>
         )}
-      </div>
-    </div>
+      </Box>
+    </Box>
   )
 }
 
@@ -93,10 +149,10 @@ function AddTaskDialog({
   }
 
   return (
-    <div className="px-3 py-2 border-t border-[var(--border-color)] space-y-2">
-      <input
-        type="text"
-        className="w-full bg-[var(--bg-elevated)] text-xs text-[var(--text-primary)] rounded-md px-2 py-1.5 outline-none border border-[var(--border-color)] focus:border-[var(--accent-blue)] transition-colors duration-150 placeholder:text-[var(--text-muted)]"
+    <Box sx={{ px: 1.5, py: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+      <TextField
+        size="small"
+        fullWidth
         placeholder="Task title..."
         value={title}
         onChange={e => setTitle(e.target.value)}
@@ -105,34 +161,42 @@ function AddTaskDialog({
           if (e.key === 'Escape') onClose()
         }}
         autoFocus
+        sx={{
+          mb: 1,
+          '& .MuiOutlinedInput-root': { fontSize: 12 },
+        }}
       />
-      <div className="flex items-center gap-1">
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
         {(['P0', 'P1', 'P2', 'P3'] as TaskPriority[]).map(p => (
-          <button
+          <Chip
             key={p}
-            className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors duration-150 cursor-pointer ${
-              priority === p ? priorityColor(p) : 'bg-[var(--bg-elevated)] text-[var(--text-muted)]'
-            }`}
+            size="small"
+            label={p}
             onClick={() => setPriority(p)}
-          >
-            {p}
-          </button>
+            sx={{
+              height: 20,
+              fontSize: 9,
+              fontWeight: 700,
+              cursor: 'pointer',
+              bgcolor: priority === p ? `${priorityColor(p)}30` : 'rgba(255,255,255,0.05)',
+              color: priority === p ? priorityColor(p) : 'text.secondary',
+              '& .MuiChip-label': { px: 0.75 },
+            }}
+          />
         ))}
-        <div className="flex-1" />
-        <button
-          className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-colors duration-150 cursor-pointer"
-          onClick={handleSubmit}
-        >
+        <Box sx={{ flex: 1 }} />
+        <Button size="small" onClick={handleSubmit} sx={{ fontSize: 10, minWidth: 0, px: 1 }}>
           Add
-        </button>
-        <button
-          className="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
+        </Button>
+        <Button
+          size="small"
           onClick={onClose}
+          sx={{ fontSize: 10, minWidth: 0, px: 1, color: 'text.secondary' }}
         >
           Cancel
-        </button>
-      </div>
-    </div>
+        </Button>
+      </Box>
+    </Box>
   )
 }
 
@@ -153,54 +217,107 @@ export function TaskPool() {
   const displayTasks = expanded ? tasks : activeTasks.slice(0, 5)
 
   return (
-    <div className="border-t border-[var(--border-color)]">
+    <Box>
       {/* Header */}
-      <button
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-[var(--bg-hover)] transition-colors duration-150 cursor-pointer"
+      <Box
         onClick={() => setExpanded(prev => !prev)}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          px: 1.5,
+          py: 1,
+          cursor: 'pointer',
+          '&:hover': { bgcolor: 'rgba(255,255,255,0.03)' },
+          transition: 'background-color 0.15s',
+        }}
       >
-        <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
-          <ListTodo size={11} />
+        <Typography
+          variant="overline"
+          sx={{
+            fontSize: 10,
+            letterSpacing: 1,
+            color: 'text.secondary',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.75,
+          }}
+        >
+          <TaskListIcon sx={{ fontSize: 13 }} />
           Tasks
           {activeTasks.length > 0 && (
-            <span className="ml-1 text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-bold">
-              {activeTasks.length}
-            </span>
+            <Chip
+              size="small"
+              label={activeTasks.length}
+              sx={{
+                height: 16,
+                fontSize: 9,
+                fontWeight: 700,
+                bgcolor: 'rgba(59,130,246,0.2)',
+                color: '#3b82f6',
+                '& .MuiChip-label': { px: 0.75 },
+              }}
+            />
           )}
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            className="p-0.5 rounded hover:bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors duration-150 cursor-pointer"
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+          <IconButton
+            size="small"
             onClick={(e) => {
               e.stopPropagation()
               refresh()
             }}
             title="Refresh tasks"
+            sx={{ p: 0.25 }}
           >
-            <RefreshCw size={10} className={loading ? 'animate-spin' : ''} />
-          </button>
-          <button
-            className="p-0.5 rounded hover:bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--accent-green)] transition-colors duration-150 cursor-pointer"
+            <RefreshIcon
+              sx={{
+                fontSize: 12,
+                animation: loading ? 'spin 1s linear infinite' : 'none',
+                '@keyframes spin': {
+                  from: { transform: 'rotate(0deg)' },
+                  to: { transform: 'rotate(360deg)' },
+                },
+              }}
+            />
+          </IconButton>
+          <IconButton
+            size="small"
             onClick={(e) => {
               e.stopPropagation()
               setShowAddDialog(true)
               setExpanded(true)
             }}
             title="Add task"
+            sx={{ p: 0.25 }}
           >
-            <Plus size={12} />
-          </button>
-          {expanded ? <ChevronUp size={12} className="text-[var(--text-muted)]" /> : <ChevronDown size={12} className="text-[var(--text-muted)]" />}
-        </div>
-      </button>
+            <AddIcon sx={{ fontSize: 14 }} />
+          </IconButton>
+          {expanded ? (
+            <ExpandLessIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+          ) : (
+            <ExpandMoreIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+          )}
+        </Box>
+      </Box>
 
       {/* Task list */}
-      {expanded && (
-        <div className="max-h-[200px] overflow-y-auto">
+      <Collapse in={expanded}>
+        <Box sx={{ maxHeight: 200, overflow: 'auto' }}>
           {displayTasks.length === 0 ? (
-            <div className="px-3 py-3 text-xs text-[var(--text-muted)] italic text-center">
+            <Typography
+              variant="caption"
+              sx={{
+                display: 'block',
+                textAlign: 'center',
+                py: 2,
+                fontStyle: 'italic',
+                color: 'text.secondary',
+                fontSize: 11,
+              }}
+            >
               {loading ? 'Loading tasks...' : 'No tasks'}
-            </div>
+            </Typography>
           ) : (
             displayTasks.map(task => (
               <TaskItem
@@ -211,8 +328,8 @@ export function TaskPool() {
               />
             ))
           )}
-        </div>
-      )}
+        </Box>
+      </Collapse>
 
       {/* Add task dialog */}
       {showAddDialog && (
@@ -221,6 +338,6 @@ export function TaskPool() {
           onClose={() => setShowAddDialog(false)}
         />
       )}
-    </div>
+    </Box>
   )
 }

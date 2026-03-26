@@ -1,124 +1,96 @@
+import { Box, Paper, IconButton, Typography } from '@mui/material'
+import {
+  Close as CloseIcon,
+  KeyboardArrowUp as ChevronUpIcon,
+  KeyboardArrowDown as ChevronDownIcon,
+  Search as SearchIcon,
+} from '@mui/icons-material'
 import { useTerminal } from '../hooks/useTerminal'
-import { X, Circle, Terminal } from 'lucide-react'
-import type { Session } from '../lib/types'
 import { SearchBar } from './SearchBar'
 
-interface TerminalTab {
-  session: Session
-}
-
 interface TerminalViewProps {
-  activeSession: Session | null
-  openTabs: TerminalTab[]
-  fontSize: number
-  onSelectTab: (session: Session) => void
-  onCloseTab: (sessionId: string) => void
+  sessionId: string | null
+  fontSize?: number
 }
 
-function TabItem({
-  tab,
-  isActive,
-  onSelect,
-  onClose,
-}: {
-  tab: TerminalTab
-  isActive: boolean
-  onSelect: () => void
-  onClose: () => void
-}) {
+export function TerminalView({ sessionId, fontSize = 14 }: TerminalViewProps) {
+  const {
+    containerRef,
+    connectionState,
+    searchVisible,
+    setSearchVisible,
+    findNext,
+    findPrevious,
+  } = useTerminal({ sessionId, fontSize })
+
   return (
-    <div
-      className={`
-        group flex items-center gap-1.5 h-7 px-3 cursor-pointer text-[11px] rounded-t-md transition-colors duration-150
-        ${isActive
-          ? 'bg-[var(--bg-primary)] border-t-2 border-[var(--accent-blue)] text-[var(--text-primary)]'
-          : 'border-t-2 border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]'
-        }
-      `}
-      onClick={onSelect}
+    <Box
+      sx={{
+        flex: 1,
+        position: 'relative',
+        bgcolor: '#0d1117',
+        minHeight: 0,
+      }}
     >
-      <Circle
-        size={7}
-        className={tab.session.status === 'running' ? 'fill-[var(--accent-green)] text-[var(--accent-green)]' : 'fill-[var(--text-muted)] text-[var(--text-muted)]'}
-      />
-      <span className="truncate max-w-[120px]">
-        {tab.session.name || `${tab.session.kind}-${tab.session.id.slice(0, 6)}`}
-      </span>
-      <button
-        className="w-4 h-4 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-elevated)] transition-all duration-150 cursor-pointer"
-        onClick={(e) => {
-          e.stopPropagation()
-          onClose()
+      {/* Connection indicator */}
+      <Box
+        sx={{
+          position: 'absolute',
+          top: 4,
+          left: 8,
+          zIndex: 10,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.5,
+          opacity: 0.6,
         }}
       >
-        <X size={10} />
-      </button>
-    </div>
-  )
-}
+        <Box
+          sx={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            bgcolor:
+              connectionState === 'connected'
+                ? 'success.main'
+                : connectionState === 'connecting'
+                  ? 'warning.main'
+                  : 'text.secondary',
+            animation:
+              connectionState === 'connecting'
+                ? 'pulse-glow 2s ease-in-out infinite'
+                : 'none',
+          }}
+        />
+        <Typography
+          variant="caption"
+          sx={{
+            fontSize: 9,
+            fontFamily: "'JetBrains Mono', monospace",
+            color: 'text.secondary',
+          }}
+        >
+          {connectionState}
+        </Typography>
+      </Box>
 
-export function TerminalView({
-  activeSession,
-  openTabs,
-  fontSize,
-  onSelectTab,
-  onCloseTab,
-}: TerminalViewProps) {
-  const { containerRef, connectionState, searchVisible, setSearchVisible, findNext, findPrevious } = useTerminal({
-    sessionId: activeSession?.kind === 'terminal' ? activeSession.id : null,
-    fontSize,
-  })
+      {/* Search bar */}
+      <SearchBar
+        isVisible={searchVisible}
+        onClose={() => setSearchVisible(false)}
+        onFindNext={findNext}
+        onFindPrevious={findPrevious}
+      />
 
-  return (
-    <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-primary)]">
-      {/* Tab bar */}
-      {openTabs.length > 0 && (
-        <div className="h-9 bg-[var(--bg-secondary)] border-b border-[var(--border-color)] flex items-center px-1 gap-0.5 overflow-x-auto shrink-0">
-          {openTabs.map(tab => (
-            <TabItem
-              key={tab.session.id}
-              tab={tab}
-              isActive={activeSession?.id === tab.session.id}
-              onSelect={() => onSelectTab(tab.session)}
-              onClose={() => onCloseTab(tab.session.id)}
-            />
-          ))}
-          {/* Connection indicator */}
-          {activeSession && (
-            <div className="ml-auto px-3 text-[10px] font-mono text-[var(--text-muted)] flex items-center gap-1.5 shrink-0">
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  connectionState === 'connected' ? 'bg-[var(--accent-green)]' :
-                  connectionState === 'connecting' ? 'bg-[var(--accent-amber)] animate-pulse-dot' :
-                  'bg-[var(--text-muted)]'
-                }`}
-              />
-              <span>{connectionState}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Terminal area */}
-      {activeSession?.kind === 'terminal' ? (
-        <div className="flex-1 relative bg-[#0d1117]">
-          <SearchBar
-            isVisible={searchVisible}
-            onClose={() => setSearchVisible(false)}
-            onFindNext={findNext}
-            onFindPrevious={findPrevious}
-          />
-          <div ref={containerRef} className="absolute inset-0 xterm-container" />
-        </div>
-      ) : (
-        <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-          <div className="text-center animate-fade-in">
-            <Terminal size={40} className="mx-auto mb-3 opacity-20" />
-            <p className="text-sm font-medium text-[var(--text-secondary)]">No terminal selected</p>
-            <p className="text-xs mt-1 text-[var(--text-muted)]">Select a session from the sidebar or create a new one</p>
-          </div>
-        </div>
-      )}
-    </div>
+      {/* Terminal container */}
+      <Box
+        ref={containerRef}
+        className="terminal-container"
+        sx={{
+          position: 'absolute',
+          inset: 0,
+        }}
+      />
+    </Box>
   )
 }

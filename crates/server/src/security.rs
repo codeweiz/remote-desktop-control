@@ -36,7 +36,7 @@ pub async fn security_headers(
     headers.insert(
         "content-security-policy",
         HeaderValue::from_static(
-            "default-src 'self'; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'",
+            "default-src 'self'; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com",
         ),
     );
 
