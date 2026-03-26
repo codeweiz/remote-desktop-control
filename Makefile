@@ -59,6 +59,14 @@ plugins: ## Build all plugins
 	cargo build --manifest-path plugins/feishu-plugin/Cargo.toml
 	cargo build --manifest-path plugins/cloudflare-tunnel/Cargo.toml
 
+install-plugins: plugins ## Build and install plugins to ~/.rtb/plugins/
+	@mkdir -p ~/.rtb/plugins/feishu-im ~/.rtb/plugins/cloudflare-tunnel
+	cp plugins/feishu-plugin/target/debug/feishu-plugin ~/.rtb/plugins/feishu-im/
+	cp plugins/feishu-plugin/plugin.toml ~/.rtb/plugins/feishu-im/plugin.toml
+	cp plugins/cloudflare-tunnel/target/debug/cloudflare-tunnel ~/.rtb/plugins/cloudflare-tunnel/
+	cp plugins/cloudflare-tunnel/plugin.toml ~/.rtb/plugins/cloudflare-tunnel/plugin.toml
+	@echo "Plugins installed to ~/.rtb/plugins/"
+
 # ── Install ─────────────────────────────────────────────────
-install: build ## Build and install rtb to /usr/local/bin
+install: build install-plugins ## Build and install rtb + plugins
 	cp target/release/rtb-cli /usr/local/bin/rtb
