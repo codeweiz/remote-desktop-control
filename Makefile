@@ -32,11 +32,13 @@ clean: ## Remove build artifacts
 	rm -rf web/dist
 
 # ── Desktop ────────────────────────────────────────────────
-desktop: web ## Build Tauri desktop app (debug)
-	npx @tauri-apps/cli build --debug
+desktop: web ## Build Tauri desktop app (.app only, skip DMG)
+	npx @tauri-apps/cli build --debug --bundles app
+	@echo "\n  Built: target/debug/bundle/macos/RTB.app"
+	@echo "  Run:   open target/debug/bundle/macos/RTB.app"
 
-desktop-release: web ## Build Tauri desktop app (release)
-	npx @tauri-apps/cli build
+desktop-release: web ## Build Tauri desktop app (release with DMG)
+	npx @tauri-apps/cli build --bundles app,dmg
 
 # ── Mobile ─────────────────────────────────────────────────
 mobile-ios: web ## Build Tauri iOS app
