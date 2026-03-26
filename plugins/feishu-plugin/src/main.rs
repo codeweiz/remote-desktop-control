@@ -1,8 +1,8 @@
 //! Feishu (Lark) IM Plugin for RTB
 //!
 //! A standalone binary that communicates with the RTB host via JSON-RPC 2.0
-//! over stdin/stdout (newline-delimited JSON). This is a skeleton implementation
-//! with placeholder Feishu API calls — the JSON-RPC protocol handling is complete.
+//! over stdin/stdout (newline-delimited JSON). Implements real Feishu Open API
+//! calls for authentication and message sending.
 //!
 //! ## Protocol
 //!
@@ -18,6 +18,7 @@
 
 use std::io::{self, BufRead, Write};
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -146,112 +147,434 @@ struct SendImageParams {
 }
 
 // ---------------------------------------------------------------------------
-// Feishu client (placeholder)
+// Feishu API base URL
 // ---------------------------------------------------------------------------
 
-/// Placeholder Feishu client. In a real implementation, this would use
-/// the Feishu Open API (https://open.feishu.cn) to send/receive messages.
+const FEISHU_API_BASE: &str = "https://open.feishu.cn/open-apis";
+
+// ---------------------------------------------------------------------------
+// Feishu API response types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct TenantAccessTokenResponse {
+    code: i64,
+    #[serde(default)]
+    msg: String,
+    #[serde(default)]
+    tenant_access_token: String,
+    #[serde(default)]
+    expire: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct FeishuApiResponse {
+    code: i64,
+    #[serde(default)]
+    msg: String,
+}
+
+// ---------------------------------------------------------------------------
+// Feishu client with real API calls
+// ---------------------------------------------------------------------------
+
+/// Feishu client that uses the Feishu Open API for authentication and messaging.
 struct FeishuClient {
     app_id: String,
     app_secret: String,
-    _access_token: Option<String>,
+    /// Default chat_id from config (can be overridden per-message).
+    default_chat_id: Option<String>,
+    /// Cached tenant access token.
+    access_token: Option<String>,
+    /// When the current token expires.
+    token_expires_at: Option<Instant>,
+    /// HTTP client for Feishu API calls.
+    http: reqwest::Client,
+    /// Whether we are in dry-run mode (no credentials).
+    dry_run: bool,
 }
 
 impl FeishuClient {
-    fn new(app_id: String, app_secret: String) -> Self {
+    fn new(app_id: String, app_secret: String, default_chat_id: Option<String>) -> Self {
+        let dry_run = app_id.is_empty() || app_secret.is_empty();
         Self {
             app_id,
             app_secret,
-            _access_token: None,
+            default_chat_id,
+            access_token: None,
+            token_expires_at: None,
+            http: reqwest::Client::new(),
+            dry_run,
         }
     }
 
-    /// Connect to Feishu (placeholder — logs instead of making real API calls).
+    /// Obtain a tenant_access_token from Feishu.
+    async fn fetch_tenant_token(&self) -> Result<(String, u64), String> {
+        let url = format!("{FEISHU_API_BASE}/auth/v3/tenant_access_token/internal/");
+        let body = serde_json::json!({
+            "app_id": self.app_id,
+            "app_secret": self.app_secret,
+        });
+
+        let resp = self
+            .http
+            .post(&url)
+            .header("Content-Type", "application/json; charset=utf-8")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {e}"))?;
+
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| format!("read body failed: {e}"))?;
+
+        if !status.is_success() {
+            return Err(format!("HTTP {status}: {text}"));
+        }
+
+        let data: TenantAccessTokenResponse =
+            serde_json::from_str(&text).map_err(|e| format!("parse response failed: {e}"))?;
+
+        if data.code != 0 {
+            return Err(format!("Feishu auth error (code={}): {}", data.code, data.msg));
+        }
+
+        if data.tenant_access_token.is_empty() {
+            return Err("Feishu returned empty tenant_access_token".to_string());
+        }
+
+        Ok((data.tenant_access_token, data.expire))
+    }
+
+    /// Ensure we have a valid (non-expired) access token. Refreshes if needed.
+    async fn ensure_token(&mut self) -> Result<String, String> {
+        if self.dry_run {
+            return Err("dry-run mode: no credentials configured".to_string());
+        }
+
+        // Check if current token is still valid (with 60s safety margin).
+        if let (Some(token), Some(expires_at)) = (&self.access_token, &self.token_expires_at) {
+            if Instant::now() + std::time::Duration::from_secs(60) < *expires_at {
+                return Ok(token.clone());
+            }
+            info!("feishu: access token expired or expiring soon, refreshing");
+        }
+
+        let (token, expire_secs) = self.fetch_tenant_token().await?;
+        info!(expire_secs, "feishu: obtained new tenant_access_token");
+        self.token_expires_at = Some(Instant::now() + std::time::Duration::from_secs(expire_secs));
+        self.access_token = Some(token.clone());
+        Ok(token)
+    }
+
+    /// Connect to Feishu by obtaining a tenant_access_token.
     async fn connect(&mut self) -> Result<(), String> {
-        // In a real implementation:
-        // 1. POST https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal/
-        //    with app_id and app_secret to get tenant_access_token
-        // 2. Store the token for subsequent API calls
-        // 3. Set up a WebSocket or long-poll for receiving messages
-
-        if self.app_id.is_empty() || self.app_secret.is_empty() {
-            info!(
-                "feishu: no app_id/app_secret configured, running in dry-run mode"
-            );
-        } else {
-            info!(
-                app_id = %self.app_id,
-                "feishu: connecting (placeholder — not calling real API)"
-            );
+        if self.dry_run {
+            info!("feishu: no app_id/app_secret configured, running in dry-run mode");
+            return Ok(());
         }
 
-        // Placeholder: always succeed
-        self._access_token = Some("placeholder_token".to_string());
+        info!(app_id = %self.app_id, "feishu: authenticating with Feishu Open API");
+        self.ensure_token().await?;
+        info!("feishu: authentication successful");
         Ok(())
     }
 
-    /// Send a text message to a Feishu chat (placeholder).
+    /// Resolve the chat_id: prefer per-message override, then default from config.
+    /// Returns an owned String to avoid borrow conflicts with `&mut self` methods.
+    fn resolve_chat_id(&self, override_id: Option<&str>) -> Result<String, String> {
+        override_id
+            .map(|s| s.to_string())
+            .or_else(|| self.default_chat_id.clone())
+            .ok_or_else(|| "no chat_id: provide 'channel' in params or 'chat_id' in config".to_string())
+    }
+
+    /// Send a text message to a Feishu chat via the IM v1 API.
     async fn send_message(
-        &self,
+        &mut self,
         text: &str,
-        chat_id: Option<&str>,
+        chat_id_override: Option<&str>,
     ) -> Result<(), String> {
-        // In a real implementation:
-        // POST https://open.feishu.cn/open-apis/im/v1/messages
-        // with receive_id_type=chat_id, receive_id=<chat_id>,
-        // msg_type=text, content={"text": "<text>"}
+        let chat_id = self.resolve_chat_id(chat_id_override)?;
 
-        info!(
-            text_len = text.len(),
-            chat_id = ?chat_id,
-            "feishu: send_message (placeholder)"
-        );
+        if self.dry_run {
+            info!(text_len = text.len(), chat_id, "feishu: send_message (dry-run)");
+            return Ok(());
+        }
+
+        // Ensure we have a valid token (auto-refresh if expired).
+        let token = self.ensure_token().await?;
+
+        let url = format!("{FEISHU_API_BASE}/im/v1/messages?receive_id_type=chat_id");
+        let content = serde_json::json!({"text": text}).to_string();
+        let body = serde_json::json!({
+            "receive_id": chat_id,
+            "msg_type": "text",
+            "content": content,
+        });
+
+        info!(text_len = text.len(), chat_id, "feishu: sending message");
         debug!(text = %text, "feishu: message content");
+
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {e}"))?;
+
+        let status = resp.status();
+        let text_body = resp.text().await.map_err(|e| format!("read body failed: {e}"))?;
+
+        if !status.is_success() {
+            return Err(format!("HTTP {status}: {text_body}"));
+        }
+
+        let data: FeishuApiResponse =
+            serde_json::from_str(&text_body).map_err(|e| format!("parse response failed: {e}"))?;
+
+        if data.code != 0 {
+            // Token may have been revoked server-side; attempt one retry.
+            if data.code == 99991663 || data.code == 99991664 {
+                warn!("feishu: token invalid/expired (code={}), retrying with fresh token", data.code);
+                self.access_token = None;
+                self.token_expires_at = None;
+                let new_token = self.ensure_token().await?;
+
+                let retry_resp = self
+                    .http
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {new_token}"))
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .json(&body)
+                    .send()
+                    .await
+                    .map_err(|e| format!("HTTP retry request failed: {e}"))?;
+
+                let retry_status = retry_resp.status();
+                let retry_body = retry_resp.text().await.map_err(|e| format!("read retry body failed: {e}"))?;
+
+                if !retry_status.is_success() {
+                    return Err(format!("HTTP {retry_status} on retry: {retry_body}"));
+                }
+
+                let retry_data: FeishuApiResponse = serde_json::from_str(&retry_body)
+                    .map_err(|e| format!("parse retry response failed: {e}"))?;
+
+                if retry_data.code != 0 {
+                    return Err(format!(
+                        "Feishu send error on retry (code={}): {}",
+                        retry_data.code, retry_data.msg
+                    ));
+                }
+
+                info!("feishu: message sent successfully (after token refresh)");
+                return Ok(());
+            }
+
+            return Err(format!("Feishu send error (code={}): {}", data.code, data.msg));
+        }
+
+        info!("feishu: message sent successfully");
         Ok(())
     }
 
-    /// Send an image to a Feishu chat (placeholder).
+    /// Send an image to a Feishu chat.
+    ///
+    /// Steps: upload the image to get an `image_key`, then send an image message.
     async fn send_image(
-        &self,
-        _data: &str,
+        &mut self,
+        data: &str,
         _mime_type: &str,
         caption: Option<&str>,
-        chat_id: Option<&str>,
+        chat_id_override: Option<&str>,
     ) -> Result<(), String> {
-        // In a real implementation:
-        // 1. Upload image via POST https://open.feishu.cn/open-apis/im/v1/images
-        // 2. Send message with msg_type=image and the image_key from step 1
+        let chat_id = self.resolve_chat_id(chat_id_override)?;
 
-        info!(
-            caption = ?caption,
-            chat_id = ?chat_id,
-            "feishu: send_image (placeholder)"
-        );
+        if self.dry_run {
+            info!(caption = ?caption, chat_id, "feishu: send_image (dry-run)");
+            return Ok(());
+        }
+
+        let token = self.ensure_token().await?;
+
+        // Step 1: Upload image
+        let upload_url = format!("{FEISHU_API_BASE}/im/v1/images");
+        let image_bytes = base64_decode(data)
+            .map_err(|e| format!("invalid base64 image data: {e}"))?;
+
+        let part = reqwest::multipart::Part::bytes(image_bytes)
+            .file_name("image.png")
+            .mime_str("application/octet-stream")
+            .map_err(|e| format!("multipart error: {e}"))?;
+
+        let form = reqwest::multipart::Form::new()
+            .text("image_type", "message")
+            .part("image", part);
+
+        let upload_resp = self
+            .http
+            .post(&upload_url)
+            .header("Authorization", format!("Bearer {token}"))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| format!("image upload HTTP failed: {e}"))?;
+
+        let upload_status = upload_resp.status();
+        let upload_body = upload_resp.text().await.map_err(|e| format!("read upload body failed: {e}"))?;
+
+        if !upload_status.is_success() {
+            return Err(format!("image upload HTTP {upload_status}: {upload_body}"));
+        }
+
+        let upload_data: serde_json::Value =
+            serde_json::from_str(&upload_body).map_err(|e| format!("parse upload response: {e}"))?;
+
+        let code = upload_data.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
+        if code != 0 {
+            let msg = upload_data.get("msg").and_then(|v| v.as_str()).unwrap_or("unknown");
+            return Err(format!("image upload error (code={code}): {msg}"));
+        }
+
+        let image_key = upload_data
+            .get("data")
+            .and_then(|d| d.get("image_key"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "no image_key in upload response".to_string())?;
+
+        info!(image_key, "feishu: image uploaded");
+
+        // Step 2: Send image message
+        let msg_url = format!("{FEISHU_API_BASE}/im/v1/messages?receive_id_type=chat_id");
+        let content = serde_json::json!({"image_key": image_key}).to_string();
+        let body = serde_json::json!({
+            "receive_id": chat_id,
+            "msg_type": "image",
+            "content": content,
+        });
+
+        let send_resp = self
+            .http
+            .post(&msg_url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("image message HTTP failed: {e}"))?;
+
+        let send_status = send_resp.status();
+        let send_body = send_resp.text().await.map_err(|e| format!("read send body failed: {e}"))?;
+
+        if !send_status.is_success() {
+            return Err(format!("image message HTTP {send_status}: {send_body}"));
+        }
+
+        let send_data: FeishuApiResponse =
+            serde_json::from_str(&send_body).map_err(|e| format!("parse send response: {e}"))?;
+
+        if send_data.code != 0 {
+            return Err(format!("image message error (code={}): {}", send_data.code, send_data.msg));
+        }
+
+        // If there is a caption, send it as a follow-up text message.
+        if let Some(cap) = caption {
+            if !cap.is_empty() {
+                info!("feishu: sending image caption as text");
+                // Need to reborrow self mutably through a separate call pattern.
+                let cap_content = serde_json::json!({"text": cap}).to_string();
+                let cap_body = serde_json::json!({
+                    "receive_id": chat_id,
+                    "msg_type": "text",
+                    "content": cap_content,
+                });
+
+                let cap_resp = self
+                    .http
+                    .post(&msg_url)
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .json(&cap_body)
+                    .send()
+                    .await
+                    .map_err(|e| format!("caption send failed: {e}"))?;
+
+                let cap_status = cap_resp.status();
+                if !cap_status.is_success() {
+                    warn!("feishu: caption send returned HTTP {cap_status} (image was sent)");
+                }
+            }
+        }
+
+        info!("feishu: image sent successfully");
         Ok(())
     }
 
-    /// Start polling for incoming messages (placeholder).
+    /// Start polling for incoming messages (stub).
     ///
-    /// In a real implementation, this would use Feishu's event subscription
-    /// (webhook or WebSocket) to receive messages.
+    /// Full receiving requires a webhook server or Feishu WebSocket subscription,
+    /// which will be implemented in a future iteration. For now this keeps the
+    /// background task alive.
     async fn start_message_listener(
         &self,
         tx: mpsc::Sender<JsonRpcNotification>,
     ) {
-        info!("feishu: message listener started (placeholder — no real polling)");
-
-        // In a real implementation, this would:
-        // 1. Subscribe to im.message.receive_v1 event via webhook/websocket
-        // 2. Parse incoming messages
-        // 3. Send im/on_message notifications to the host
-
-        // Placeholder: just keep the task alive
-        // In production, replace this with actual Feishu event subscription
-        let _tx = tx; // keep the sender alive
+        info!("feishu: message listener started (receiving not yet implemented)");
+        let _tx = tx;
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
         }
     }
+}
+
+/// Simple base64 decoder (standard alphabet, with optional padding).
+fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
+    // Use a minimal inline decoder to avoid adding another dependency.
+    const TABLE: [u8; 128] = {
+        let mut t = [255u8; 128];
+        let mut i = 0u8;
+        while i < 26 {
+            t[(b'A' + i) as usize] = i;
+            t[(b'a' + i) as usize] = i + 26;
+            i += 1;
+        }
+        let mut d = 0u8;
+        while d < 10 {
+            t[(b'0' + d) as usize] = d + 52;
+            d += 1;
+        }
+        t[b'+' as usize] = 62;
+        t[b'/' as usize] = 63;
+        t
+    };
+
+    let bytes: Vec<u8> = input.bytes().filter(|&b| b != b'=' && b != b'\n' && b != b'\r').collect();
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+    let chunks = bytes.chunks(4);
+    for chunk in chunks {
+        let mut buf = [0u8; 4];
+        for (i, &b) in chunk.iter().enumerate() {
+            if b >= 128 || TABLE[b as usize] == 255 {
+                return Err(format!("invalid base64 byte: {b}"));
+            }
+            buf[i] = TABLE[b as usize];
+        }
+        let n = chunk.len();
+        if n >= 2 {
+            out.push((buf[0] << 2) | (buf[1] >> 4));
+        }
+        if n >= 3 {
+            out.push((buf[1] << 4) | (buf[2] >> 2));
+        }
+        if n >= 4 {
+            out.push((buf[2] << 6) | buf[3]);
+        }
+    }
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -319,10 +642,17 @@ async fn handle_initialize(
         .or_else(|| std::env::var("FEISHU_APP_SECRET").ok())
         .unwrap_or_default();
 
+    let chat_id = params
+        .config
+        .get("chat_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("FEISHU_CHAT_ID").ok());
+
     // Initialize the Feishu client
     {
         let mut feishu = client.lock().await;
-        *feishu = FeishuClient::new(app_id, app_secret);
+        *feishu = FeishuClient::new(app_id, app_secret, chat_id);
 
         if let Err(e) = feishu.connect().await {
             // Send status notification
@@ -396,13 +726,16 @@ async fn handle_send_message(
         }
     };
 
-    let feishu = client.lock().await;
+    let mut feishu = client.lock().await;
     match feishu
         .send_message(&params.text, params.channel.as_deref())
         .await
     {
         Ok(()) => JsonRpcResponse::success(req.id, serde_json::json!({"ok": true})),
-        Err(e) => JsonRpcResponse::error(req.id, -32603, format!("send failed: {e}")),
+        Err(e) => {
+            error!(error = %e, "feishu: send_message failed");
+            JsonRpcResponse::error(req.id, -32603, format!("send failed: {e}"))
+        }
     }
 }
 
@@ -426,7 +759,7 @@ async fn handle_send_image(
         }
     };
 
-    let feishu = client.lock().await;
+    let mut feishu = client.lock().await;
     match feishu
         .send_image(
             &params.data,
@@ -437,7 +770,10 @@ async fn handle_send_image(
         .await
     {
         Ok(()) => JsonRpcResponse::success(req.id, serde_json::json!({"ok": true})),
-        Err(e) => JsonRpcResponse::error(req.id, -32603, format!("send image failed: {e}")),
+        Err(e) => {
+            error!(error = %e, "feishu: send_image failed");
+            JsonRpcResponse::error(req.id, -32603, format!("send image failed: {e}"))
+        }
     }
 }
 
@@ -472,6 +808,7 @@ async fn main() {
     let client = Arc::new(tokio::sync::Mutex::new(FeishuClient::new(
         String::new(),
         String::new(),
+        None,
     )));
 
     // Channel for outgoing notifications (plugin -> host)
