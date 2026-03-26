@@ -55,6 +55,8 @@ pub enum DataEvent {
     PtyOutput { seq: u64, data: Bytes },
     PtyExited { exit_code: i32 },
     // Agent events (expanded for Phase 2)
+    /// User message sent to the agent (from web UI, IM, or API).
+    AgentUserMessage { seq: u64, text: String, source: String },
     AgentText { seq: u64, content: String, streaming: bool },
     AgentThinking { seq: u64, content: String },
     AgentToolUse { seq: u64, id: String, name: String, input: serde_json::Value },

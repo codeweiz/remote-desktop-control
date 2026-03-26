@@ -353,6 +353,12 @@ fn data_event_to_json(event: &DataEvent) -> serde_json::Value {
                 "guidance": guidance,
             })
         }
+        DataEvent::AgentUserMessage { seq, text, source } => serde_json::json!({
+            "type": "user_message",
+            "seq": seq,
+            "text": text,
+            "source": source,
+        }),
         _ => serde_json::json!({ "type": "unknown" }),
     }
 }

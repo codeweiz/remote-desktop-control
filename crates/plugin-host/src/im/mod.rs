@@ -439,9 +439,9 @@ impl ImBridge {
                         }
                     };
 
-                    // Forward message to agent
+                    // Forward message to agent (with source tracking)
                     if let Err(e) =
-                        core.agent_manager.send_message(&session_id, text).await
+                        core.agent_manager.send_message_from(&session_id, text, "feishu").await
                     {
                         let _ = outgoing_tx
                             .send(OutgoingMessage {
@@ -550,6 +550,7 @@ impl ImBridge {
                             }).await;
                         }
                     }
+                    Some(DataEvent::AgentUserMessage { .. }) => {}
                     Some(DataEvent::AgentThinking { .. }) => {}
                     Some(DataEvent::AgentToolUse { name, .. }) => {
                         let _ = outgoing_tx.send(OutgoingMessage {
@@ -623,6 +624,7 @@ impl ImBridge {
                             }).await;
                         }
                     }
+                    Some(DataEvent::AgentUserMessage { .. }) => {}
                     Some(DataEvent::AgentThinking { .. }) => {
                         // Skip thinking events to reduce noise
                     }
@@ -751,6 +753,7 @@ impl ImBridge {
                                         }).await;
                                     }
                                 }
+                                Some(DataEvent::AgentUserMessage { .. }) => {}
                                 // Agent thinking: skip to reduce noise
                                 Some(DataEvent::AgentThinking { .. }) => {
                                     debug!(session_id = %session_id, "agent thinking event (skipped for IM)");

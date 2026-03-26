@@ -159,10 +159,33 @@ impl AgentManager {
         session_id: &str,
         text: String,
     ) -> Result<(), String> {
+        self.send_message_from(session_id, text, "web").await
+    }
+
+    /// Send a user message to an agent, with source tracking.
+    ///
+    /// Publishes an `AgentUserMessage` data event so all subscribers (web UI,
+    /// IM bridge) can see the user's input regardless of origin.
+    pub async fn send_message_from(
+        &self,
+        session_id: &str,
+        text: String,
+        source: &str,
+    ) -> Result<(), String> {
         let agent = self
             .agents
             .get(session_id)
             .ok_or_else(|| "Agent not running".to_string())?;
+
+        // Publish user message event so all frontends can see it
+        self.event_bus.publish_data(
+            session_id,
+            crate::events::DataEvent::AgentUserMessage {
+                seq: 0,
+                text: text.clone(),
+                source: source.to_string(),
+            },
+        );
 
         agent.backend.send_message_fire(&text).await
     }
