@@ -150,9 +150,18 @@ impl Default for RateLimiter {
 
 /// Extract the client IP address from the request.
 ///
-/// Checks `X-Forwarded-For`, `X-Real-Ip`, and falls back to `127.0.0.1`.
+/// Checks (in order): `Cf-Connecting-Ip` (Cloudflare), `X-Forwarded-For`,
+/// `X-Real-Ip`, and falls back to `127.0.0.1`.
 pub fn extract_client_ip(req: &Request<Body>) -> IpAddr {
-    // Try X-Forwarded-For first (first IP in the list)
+    // Check Cf-Connecting-Ip (Cloudflare tunnel / CDN)
+    if let Some(cf_ip) = req.headers().get("cf-connecting-ip") {
+        if let Ok(value) = cf_ip.to_str() {
+            if let Ok(ip) = value.trim().parse::<IpAddr>() {
+                return ip;
+            }
+        }
+    }
+    // Try X-Forwarded-For (first IP in the list)
     if let Some(xff) = req.headers().get("x-forwarded-for") {
         if let Ok(value) = xff.to_str() {
             if let Some(first) = value.split(',').next() {
@@ -207,10 +216,11 @@ pub async fn rate_limit_middleware(
     let ip = extract_client_ip(&request);
     let category = classify(&request);
 
-    // Check blocklist first
-    if state.blocklist.is_banned(&ip) {
-        return (StatusCode::FORBIDDEN, "Forbidden: IP banned").into_response();
-    }
+    // NOTE: Blocklist check is intentionally NOT here. It lives in
+    // auth_middleware so that only API routes (which require auth) are
+    // subject to IP bans. This prevents Cloudflare tunnel traffic and
+    // normal static-file requests from being blocked when an IP gets
+    // banned due to auth failures.
 
     // Check rate limit
     if !state.rate_limiter.check(&ip, category) {

@@ -9,10 +9,14 @@ rust-version.workspace = true
 name = "rtb_desktop"
 crate-type = ["staticlib", "cdylib", "lib"]
 
+[features]
+default = ["embedded-server"]
+embedded-server = ["dep:rtb-core", "dep:rtb-server", "dep:rtb-plugin-host"]
+
 [dependencies]
-rtb-core = { path = "../core" }
-rtb-server = { path = "../server" }
-rtb-plugin-host = { path = "../plugin-host" }
+rtb-core = { path = "../core", optional = true }
+rtb-server = { path = "../server", optional = true }
+rtb-plugin-host = { path = "../plugin-host", optional = true }
 tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-shell = "2"
 tauri-plugin-single-instance = "2"

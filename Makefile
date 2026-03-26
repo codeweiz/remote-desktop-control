@@ -41,8 +41,8 @@ desktop-release: web ## Build Tauri desktop app (release with DMG)
 	npx @tauri-apps/cli build --bundles app,dmg
 
 # ── Mobile ─────────────────────────────────────────────────
-mobile-ios: web ## Build Tauri iOS app
-	npx @tauri-apps/cli ios build --debug
+mobile-ios: web ## Build Tauri iOS app (pure WebView client, no embedded server)
+	npx @tauri-apps/cli ios build --debug -- --no-default-features
 
 mobile-android: web ## Build Tauri Android app
 	npx @tauri-apps/cli android build --debug

@@ -4,9 +4,13 @@
 use tauri::Manager;
 
 mod commands;
+#[cfg(feature = "embedded-server")]
 mod tray;
 
-/// Shared app builder setup used by both desktop `main()` and mobile `run()`.
+// ---------------------------------------------------------------------------
+// Desktop: embedded server mode (default feature)
+// ---------------------------------------------------------------------------
+#[cfg(feature = "embedded-server")]
 pub fn create_app() -> tauri::Builder<tauri::Wry> {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -43,6 +47,43 @@ pub fn create_app() -> tauri::Builder<tauri::Wry> {
                     let url = format!("http://127.0.0.1:{}?token={}", port, token);
                     tracing::info!("Navigating WebView to {}", url);
                     let _ = window.eval(&format!("window.location.href = '{}';", url));
+                }
+            });
+            Ok(())
+        })
+}
+
+// ---------------------------------------------------------------------------
+// Mobile / no-server: thin WebView client that connects to a remote RTB server
+// ---------------------------------------------------------------------------
+#[cfg(not(feature = "embedded-server"))]
+pub fn create_app() -> tauri::Builder<tauri::Wry> {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
+        // No embedded daemon, no server deps
+        .manage(commands::create_connection_state())
+        .invoke_handler(tauri::generate_handler![
+            commands::connect_to_server,
+            commands::get_connection,
+            commands::disconnect,
+        ])
+        .setup(|app| {
+            // On mobile, the WebView starts at the bundled connection page.
+            // The user enters a server URL + token, then we navigate there.
+            tracing::info!("RTB mobile client started (no embedded server)");
+
+            // If a saved server URL exists, navigate directly
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state: tauri::State<'_, commands::ConnectionStateRef> = app_handle.state();
+                let s = state.read().await;
+                if !s.server_url.is_empty() && !s.token.is_empty() {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let url = format!("{}?token={}", s.server_url, s.token);
+                        tracing::info!("Navigating to saved server: {}", s.server_url);
+                        let _ = window.eval(&format!("window.location.href = '{}';", url));
+                    }
                 }
             });
             Ok(())
