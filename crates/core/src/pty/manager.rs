@@ -61,13 +61,15 @@ impl PtyManager {
         let shell = shell.unwrap_or(&self.config.server.shell);
         let buffer_capacity = self.config.session.buffer_size;
 
-        let session = PtySession::spawn(
+        let coalesce_ms = self.config.session.output_coalesce_ms;
+        let session = PtySession::spawn_with_coalesce(
             session_id.clone(),
             name.to_string(),
             shell,
             cwd,
             self.event_bus.clone(),
             buffer_capacity,
+            coalesce_ms,
         )?;
 
         self.sessions.insert(session_id.clone(), session);

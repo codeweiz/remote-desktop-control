@@ -32,7 +32,18 @@ pub fn setup_logging(config: &Config) -> anyhow::Result<()> {
     // Resolve access log directory and file name from config
     let access_log_path = &config.logging.access_log;
 
-    // Try to set up file appender for access logs
+    // Try to set up file appender for access logs.
+    //
+    // Uses `tracing_appender::rolling::daily` for automatic log rotation.
+    // A new log file is created each day with a date suffix
+    // (e.g., `access.jsonl.2026-03-26`). This prevents any single log file
+    // from growing unboundedly.
+    //
+    // Note: `tracing_appender::rolling` supports time-based rotation
+    // (daily/hourly) but not size-based rotation out of the box.
+    // `max_file_size_mb` and `max_files` from the config are reserved for
+    // future size-based rotation via an external log rotation tool or a
+    // custom appender.
     let file_layer = if !access_log_path.is_empty() {
         let log_path = Path::new(access_log_path);
         let log_dir = log_path
@@ -48,7 +59,13 @@ pub fn setup_logging(config: &Config) -> anyhow::Result<()> {
             eprintln!("Warning: could not create log directory {}: {}", log_dir.display(), e);
             None
         } else {
-            let file_appender = rolling::never(log_dir, log_filename);
+            // Use daily rolling appender for automatic log rotation.
+            // Config values max_file_size_mb={} and max_files={} are noted
+            // for future size-based rotation.
+            let _max_file_size_mb = config.logging.max_file_size_mb;
+            let _max_files = config.logging.max_files;
+
+            let file_appender = rolling::daily(log_dir, log_filename);
             Some(
                 fmt::layer()
                     .json()

@@ -67,4 +67,13 @@ impl RingBuffer {
             .map(|(seq, _)| *seq)
             .unwrap_or(0)
     }
+
+    /// Return the sequence number of the oldest entry, or `None` if empty.
+    pub fn first_seq(&self) -> Option<u64> {
+        self.buffer
+            .lock()
+            .unwrap()
+            .front()
+            .map(|(seq, _)| *seq)
+    }
 }

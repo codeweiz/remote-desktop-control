@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use qrcode::QrCode;
 use rtb_core::config::Config;
 use rtb_core::task_pool::scheduler::{SchedulerConfig, TaskScheduler};
 use rtb_core::CoreState;
@@ -8,6 +9,19 @@ use rtb_plugin_host::manager::PluginManager;
 
 use crate::daemon;
 use crate::Cli;
+
+/// Print a QR code to the terminal using Unicode block characters.
+/// The QR code encodes the given URL for easy mobile scanning.
+fn print_qr_code(url: &str) {
+    if let Ok(code) = QrCode::new(url.as_bytes()) {
+        let string = code
+            .render::<char>()
+            .quiet_zone(false)
+            .module_dimensions(2, 1)
+            .build();
+        println!("{}", string);
+    }
+}
 
 /// Start the RTB daemon.
 ///
@@ -103,6 +117,12 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
     println!("  Local:   {}", url);
     println!("  Token:   {}", token);
     println!();
+
+    // Print QR code for easy mobile access (unless --no-qr flag is set)
+    if !cli.no_qr {
+        print_qr_code(&url);
+        println!();
+    }
 
     // 12. Write PID file
     daemon::write_pid_file()?;

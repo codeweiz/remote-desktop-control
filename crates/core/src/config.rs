@@ -240,7 +240,16 @@ impl Config {
     /// Load config from the default path (`~/.rtb/config.toml`).
     /// Returns defaults if the file does not exist.
     /// Applies env var overrides and tilde expansion.
+    ///
+    /// Before loading, checks for a legacy v1 `config.json` in the same
+    /// directory and migrates it to `config.toml` if present.
     pub fn load() -> Result<Self, ConfigError> {
+        // Attempt v1 migration before loading
+        if let Err(e) = Self::migrate_from_v1() {
+            // Non-fatal: log and continue
+            eprintln!("Warning: v1 config migration failed: {}", e);
+        }
+
         let path = Self::default_path()?;
         let path_str = path
             .to_str()
@@ -301,6 +310,101 @@ impl Config {
         let content = toml::to_string_pretty(self)
             .map_err(|e| ConfigError::Serialize(e.to_string()))?;
         std::fs::write(path, content).map_err(|e| ConfigError::Io(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Migrate a v1 `config.json` (from the old Node.js RTB) to the
+    /// current `config.toml` format.
+    ///
+    /// The v1 JSON format looked like:
+    /// ```json
+    /// {
+    ///   "feishu": { "appId": "...", "appSecret": "..." },
+    ///   "tunnel": { "type": "quick", "name": "..." },
+    ///   "port": 3000,
+    ///   "host": "0.0.0.0"
+    /// }
+    /// ```
+    ///
+    /// On success:
+    /// 1. Writes a new `config.toml` with the mapped fields.
+    /// 2. Renames `config.json` to `config.json.v1.bak`.
+    /// 3. Prints a migration summary to stderr.
+    ///
+    /// Does nothing if `config.json` does not exist or `config.toml` already
+    /// exists (we never overwrite an existing TOML config).
+    pub fn migrate_from_v1() -> Result<(), ConfigError> {
+        let rtb_dir = Self::rtb_dir()?;
+        let json_path = rtb_dir.join("config.json");
+        let toml_path = rtb_dir.join("config.toml");
+
+        // Only migrate if config.json exists and config.toml does NOT
+        if !json_path.exists() || toml_path.exists() {
+            return Ok(());
+        }
+
+        let content = std::fs::read_to_string(&json_path)
+            .map_err(|e| ConfigError::Io(e.to_string()))?;
+
+        let v1: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| ConfigError::Parse(format!("v1 config.json parse error: {}", e)))?;
+
+        let mut config = Config::default();
+        let mut migrated_fields = Vec::new();
+
+        // Map known v1 fields to the new config structure
+        if let Some(port) = v1.get("port").and_then(|v| v.as_u64()) {
+            config.server.port = port as u16;
+            migrated_fields.push("port");
+        }
+        if let Some(host) = v1.get("host").and_then(|v| v.as_str()) {
+            config.server.host = host.to_string();
+            migrated_fields.push("host");
+        }
+        if let Some(shell) = v1.get("shell").and_then(|v| v.as_str()) {
+            config.server.shell = shell.to_string();
+            migrated_fields.push("shell");
+        }
+
+        // Tunnel config
+        if let Some(tunnel) = v1.get("tunnel") {
+            if let Some(tunnel_type) = tunnel.get("type").and_then(|v| v.as_str()) {
+                config.tunnel.provider = tunnel_type.to_string();
+                migrated_fields.push("tunnel.type -> tunnel.provider");
+            }
+            if let Some(name) = tunnel.get("name").and_then(|v| v.as_str()) {
+                config.tunnel.domain = name.to_string();
+                migrated_fields.push("tunnel.name -> tunnel.domain");
+            }
+        }
+
+        // Write the new config.toml
+        let toml_content = toml::to_string_pretty(&config)
+            .map_err(|e| ConfigError::Serialize(e.to_string()))?;
+
+        // Ensure the directory exists
+        if let Some(parent) = toml_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| ConfigError::Io(e.to_string()))?;
+        }
+
+        std::fs::write(&toml_path, toml_content)
+            .map_err(|e| ConfigError::Io(e.to_string()))?;
+
+        // Rename config.json to config.json.v1.bak
+        let backup_path = rtb_dir.join("config.json.v1.bak");
+        std::fs::rename(&json_path, &backup_path)
+            .map_err(|e| ConfigError::Io(e.to_string()))?;
+
+        // Print migration summary
+        eprintln!("Migrated v1 config.json -> config.toml");
+        if migrated_fields.is_empty() {
+            eprintln!("  No known fields found; wrote defaults.");
+        } else {
+            eprintln!("  Migrated fields: {}", migrated_fields.join(", "));
+        }
+        eprintln!("  Backup saved: {}", backup_path.display());
+
         Ok(())
     }
 

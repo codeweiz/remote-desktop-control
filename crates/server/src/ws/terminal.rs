@@ -81,10 +81,40 @@ async fn handle_terminal(
     // 3. Subscribe to session data channel via EventBus
     let mut data_rx = state.core.event_bus.create_data_subscriber(&session_id);
 
-    // 4. If last_seq provided, replay missed events from ring buffer
+    // 4. If last_seq provided, replay missed events from ring buffer.
+    //    If the requested seq is older than the ring buffer's oldest entry,
+    //    send a replay_gap indicator first so the client knows about the gap.
     if let Some(seq) = last_seq {
         if let Some(session) = state.core.pty_manager.get_session(&session_id) {
-            let missed = session.buffer().get_since(seq);
+            let ring = session.buffer();
+
+            // Detect gap: if the client's last_seq is before the ring buffer's
+            // oldest entry, there are events we can no longer replay.
+            if let Some(first_available) = ring.first_seq() {
+                if seq < first_available.saturating_sub(1) {
+                    let gap_msg = serde_json::json!({
+                        "type": "replay_gap",
+                        "missed_from": seq,
+                        "available_from": first_available,
+                    });
+                    if ws_tx
+                        .send(Message::Text(gap_msg.to_string().into()))
+                        .await
+                        .is_err()
+                    {
+                        warn!(session_id = %session_id, "failed to send replay_gap, closing");
+                        return;
+                    }
+                    debug!(
+                        session_id = %session_id,
+                        missed_from = seq,
+                        available_from = first_available,
+                        "sent replay_gap indicator"
+                    );
+                }
+            }
+
+            let missed = ring.get_since(seq);
             let mut replayed_last_seq = seq;
 
             for (event_seq, data) in missed {
