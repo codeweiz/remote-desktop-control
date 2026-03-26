@@ -40,20 +40,25 @@ export interface WsMessage {
   [key: string]: unknown
 }
 
-export interface TerminalOutput {
-  type: 'output'
-  data: string // base64 encoded
-}
-
-export interface TerminalInput {
-  type: 'input'
-  data: string // base64 encoded
-}
-
 export interface TerminalResize {
   type: 'resize'
   cols: number
   rows: number
+}
+
+export interface KeepaliveMessage {
+  type: 'keepalive'
+  client_time: number
+}
+
+export interface KeepaliveAck {
+  type: 'keepalive_ack'
+  server_time: number
+}
+
+export interface TerminalExit {
+  type: 'exit'
+  code: number
 }
 
 export interface SessionEvent {
