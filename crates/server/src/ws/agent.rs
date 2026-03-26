@@ -267,6 +267,18 @@ async fn handle_agent(
                             break;
                         }
                     }
+                    Some(DataEvent::AgentUserMessage { seq, text, source }) => {
+                        let msg = serde_json::json!({
+                            "type": "user_message",
+                            "seq": seq,
+                            "text": text,
+                            "source": source,
+                        });
+                        if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
+                            debug!(session_id = %session_id, "failed to send user_message, closing");
+                            break;
+                        }
+                    }
                     Some(_) => {
                         // Ignore non-agent data events (PTY output, etc.)
                     }
