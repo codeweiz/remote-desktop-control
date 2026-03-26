@@ -185,7 +185,7 @@ impl AgentManager {
                 text: text.clone(),
                 source: source.to_string(),
             },
-        );
+        ).await;
 
         agent.backend.send_message_fire(&text).await
     }
