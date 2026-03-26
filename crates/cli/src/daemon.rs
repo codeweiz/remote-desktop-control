@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rtb_core::config::Config;
 use rtb_core::session::store::SessionStore;
-use rtb_core::session::types::SessionStatus;
+use rtb_core::session::types::{SessionStatus, SessionType};
 
 // ---------------------------------------------------------------------------
 // Token management
@@ -200,8 +200,10 @@ pub fn check_stale_pid() -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 /// Scan the session store for sessions with status "running" or "suspended".
-/// Since PTY processes cannot survive across daemon restarts, update them
-/// to "crashed" status and log a summary.
+///
+/// Terminal sessions cannot survive daemon restarts (PTY processes are gone),
+/// so they are marked "exited".  Agent sessions may be resumable, so they are
+/// marked "suspended".
 pub fn restore_sessions() -> Result<()> {
     let sessions_dir = Config::rtb_dir()
         .map(|d| d.join("sessions"))
@@ -216,34 +218,50 @@ pub fn restore_sessions() -> Result<()> {
         .context("failed to open session store for restore")?;
 
     let sessions = store.list().unwrap_or_default();
-    let mut crashed_count = 0u32;
+    let mut exited_count = 0u32;
+    let mut suspended_count = 0u32;
 
     for mut meta in sessions {
         if meta.status == SessionStatus::Running || meta.status == SessionStatus::Suspended {
             let old_status = format!("{:?}", meta.status);
-            meta.status = SessionStatus::Crashed;
+
+            // Terminal sessions: PTY processes cannot survive restarts
+            // Agent sessions: may be resumable, mark as suspended
+            let new_status = match meta.session_type {
+                SessionType::Terminal => SessionStatus::Exited,
+                SessionType::Agent => SessionStatus::Suspended,
+            };
+
+            meta.status = new_status.clone();
             if let Err(e) = store.update_meta(&meta.id, &meta) {
                 tracing::warn!(
                     session_id = %meta.id,
                     error = %e,
-                    "Failed to update crashed session"
+                    "Failed to update orphaned session"
                 );
             } else {
                 tracing::info!(
                     session_id = %meta.id,
                     old_status = %old_status,
-                    "Marked orphaned session as crashed"
+                    new_status = ?new_status,
+                    session_type = ?meta.session_type,
+                    "Restored orphaned session"
                 );
-                crashed_count += 1;
+                match meta.session_type {
+                    SessionType::Terminal => exited_count += 1,
+                    SessionType::Agent => suspended_count += 1,
+                }
             }
         }
     }
 
-    if crashed_count > 0 {
-        tracing::warn!(
-            count = crashed_count,
-            "Marked {} orphaned session(s) as crashed from previous run",
-            crashed_count
+    if exited_count > 0 || suspended_count > 0 {
+        tracing::info!(
+            exited = exited_count,
+            suspended = suspended_count,
+            "Session restore: {} terminal session(s) marked exited, {} agent session(s) marked suspended",
+            exited_count,
+            suspended_count,
         );
     }
 
@@ -265,6 +283,11 @@ pub fn api_base() -> Result<(String, String)> {
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
+
+/// Return the expanded token file path from config.
+pub fn expand_token_path(config: &Config) -> String {
+    expand_tilde(&config.security.token_file)
+}
 
 /// Expand a leading `~` to the current user's home directory.
 fn expand_tilde(s: &str) -> String {

@@ -22,6 +22,8 @@ pub struct CoreState {
     pub pty_manager: Arc<pty::manager::PtyManager>,
     pub session_store: Arc<session::store::SessionStore>,
     pub agent_manager: Arc<agent::manager::AgentManager>,
+    pub task_pool: Arc<task_pool::pool::TaskPool>,
+    pub notification_router: Arc<notification::router::NotificationRouter>,
 }
 
 impl CoreState {
@@ -44,12 +46,30 @@ impl CoreState {
             Arc::clone(&event_bus),
         ));
 
+        // Task pool backed by ~/.rtb/tasks.jsonl
+        let tasks_path = config::Config::rtb_dir()
+            .map(|d| d.join("tasks.jsonl"))
+            .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/rtb/tasks.jsonl"));
+        let task_pool = Arc::new(task_pool::pool::TaskPool::new(tasks_path));
+
+        // Notification router wired to the event bus
+        let router_config = notification::router::RouterConfig {
+            channels: config.notification.channels.clone(),
+            sound_enabled: config.notification.sound_enabled,
+        };
+        let notification_router = Arc::new(notification::router::NotificationRouter::new(
+            router_config,
+            Arc::clone(&event_bus),
+        ));
+
         Ok(Self {
             config,
             event_bus,
             pty_manager,
             session_store,
             agent_manager,
+            task_pool,
+            notification_router,
         })
     }
 }

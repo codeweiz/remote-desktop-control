@@ -7,7 +7,7 @@ use axum::{
 use serde::Serialize;
 
 use crate::{
-    api::{sessions, status},
+    api::{sessions, status, token},
     auth::auth_middleware,
     logging::access_log_middleware,
     rate_limit::rate_limit_middleware,
@@ -34,6 +34,7 @@ fn api_routes() -> Router<AppState> {
         .route("/sessions", get(sessions::list_sessions))
         .route("/sessions", post(sessions::create_session))
         .route("/sessions/{id}", delete(sessions::delete_session))
+        .route("/token/rotate", post(token::rotate_token))
 }
 
 /// Assemble the complete application router.

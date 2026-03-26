@@ -1,7 +1,10 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use rtb_core::config::Config;
+use rtb_core::task_pool::scheduler::{SchedulerConfig, TaskScheduler};
 use rtb_core::CoreState;
+use rtb_plugin_host::manager::PluginManager;
 
 use crate::daemon;
 use crate::Cli;
@@ -48,10 +51,48 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
     // 6. Initialize core
     let core = Arc::new(CoreState::new(config.clone())?);
 
-    // 7. Generate or load auth token
+    // 7. Load tasks from disk into the task pool
+    if let Err(e) = core.task_pool.load().await {
+        tracing::warn!(error = %e, "Failed to load task pool from disk (continuing with empty pool)");
+    }
+
+    // 8. Start task pool scheduler as a background task
+    let scheduler_config = SchedulerConfig {
+        max_concurrent: config.task_pool.max_concurrent,
+        auto_start: config.task_pool.auto_start,
+        poll_interval_secs: 5,
+    };
+    let task_scheduler = TaskScheduler::new(scheduler_config, Arc::clone(&core.task_pool));
+    let scheduler_handle = task_scheduler.start();
+    tracing::info!("Task pool scheduler started");
+
+    // 9. Start plugin manager (discovers and spawns plugins from ~/.rtb/plugins/)
+    let plugins_dir = PathBuf::from(&config.plugins.dir);
+    let plugin_manager = Arc::new(PluginManager::new(
+        plugins_dir,
+        Arc::clone(&core.event_bus),
+        config.plugins.jsonrpc_timeout_secs,
+    ));
+    if let Err(e) = plugin_manager.start_all().await {
+        tracing::warn!(error = %e, "Plugin manager start_all encountered errors (continuing)");
+    }
+
+    // Background task: plugin health checks every 10 seconds
+    tokio::spawn({
+        let pm = Arc::clone(&plugin_manager);
+        async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+            loop {
+                interval.tick().await;
+                pm.health_check().await;
+            }
+        }
+    });
+
+    // 10. Generate or load auth token
     let token = daemon::load_or_create_token(&config)?;
 
-    // 8. Print access info
+    // 11. Print access info
     let url = format!(
         "http://{}:{}?token={}",
         config.server.host, config.server.port, token
@@ -63,13 +104,14 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
     println!("  Token:   {}", token);
     println!();
 
-    // 9. Write PID file
+    // 12. Write PID file
     daemon::write_pid_file()?;
 
-    // 10. Register signal handlers for graceful shutdown
-    //     On SIGTERM/SIGINT: log, remove PID file, exit.
-    //     We use tokio::signal for async-safe handling inside the runtime.
-    let shutdown = async {
+    // 13. Register signal handlers for graceful shutdown
+    //     On SIGTERM/SIGINT: save state, stop subsystems, remove PID file, exit.
+    let shutdown_core = Arc::clone(&core);
+    let shutdown_plugin_manager = Arc::clone(&plugin_manager);
+    let shutdown = async move {
         // Wait for either SIGINT (Ctrl-C) or SIGTERM
         let ctrl_c = tokio::signal::ctrl_c();
 
@@ -91,12 +133,51 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
         }
 
         tracing::info!("Shutting down...");
+
+        // Stop the task pool scheduler
+        scheduler_handle.stop();
+        tracing::info!("Task scheduler stopped");
+
+        // Save the task pool to disk
+        if let Err(e) = shutdown_core.task_pool.save().await {
+            tracing::warn!(error = %e, "Failed to save task pool during shutdown");
+        } else {
+            tracing::info!("Task pool saved to disk");
+        }
+
+        // Stop all plugins
+        shutdown_plugin_manager.stop_all().await;
+        tracing::info!("All plugins stopped");
+
+        // Mark active sessions with appropriate status:
+        // - Terminal (Running) -> Exited
+        // - Agent (Running) -> Suspended
+        if let Ok(sessions) = shutdown_core.session_store.list() {
+            for mut meta in sessions {
+                if meta.status == rtb_core::session::types::SessionStatus::Running {
+                    let new_status = match meta.session_type {
+                        rtb_core::session::types::SessionType::Terminal => {
+                            rtb_core::session::types::SessionStatus::Exited
+                        }
+                        rtb_core::session::types::SessionType::Agent => {
+                            rtb_core::session::types::SessionStatus::Suspended
+                        }
+                    };
+                    meta.status = new_status;
+                    if let Err(e) = shutdown_core.session_store.update_meta(&meta.id, &meta) {
+                        tracing::warn!(session_id = %meta.id, error = %e, "Failed to update session on shutdown");
+                    }
+                }
+            }
+            tracing::info!("Active sessions saved");
+        }
+
         if let Err(e) = daemon::remove_pid_file() {
             tracing::warn!(error = %e, "Failed to remove PID file during shutdown");
         }
     };
 
-    // 11. Start server with graceful shutdown
+    // 14. Start server with graceful shutdown
     let blocklist = Arc::new(rtb_server::blocklist::IpBlocklist::new(Vec::new()));
     let rate_limiter = Arc::new(rtb_server::rate_limit::RateLimiter::new());
 
@@ -133,7 +214,7 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown)
         .await?;
 
-    // 12. Final cleanup on normal exit (PID file may already be removed by signal handler)
+    // 15. Final cleanup on normal exit (PID file may already be removed by signal handler)
     let _ = daemon::remove_pid_file();
 
     Ok(())

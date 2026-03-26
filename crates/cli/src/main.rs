@@ -44,6 +44,11 @@ pub enum Commands {
         #[command(subcommand)]
         action: SessionAction,
     },
+    /// Token management
+    Token {
+        #[command(subcommand)]
+        action: TokenAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -65,6 +70,14 @@ pub enum SessionAction {
     },
 }
 
+#[derive(Subcommand)]
+pub enum TokenAction {
+    /// Rotate the authentication token
+    Rotate,
+    /// Show the current token
+    Show,
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
@@ -81,6 +94,10 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Session { action }) => {
             init_basic_tracing();
             commands::session::handle(action)?;
+        }
+        Some(Commands::Token { action }) => {
+            init_basic_tracing();
+            commands::token::handle(action)?;
         }
 
         // `rtb start ...` or just `rtb` (no subcommand) both start the daemon.
