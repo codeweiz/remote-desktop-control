@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use anyhow::{anyhow, Result};
@@ -12,6 +11,7 @@ use crate::notification::detector::Detector;
 use crate::notification::router::NotificationRouter;
 
 use super::session::{PtySession, PtySessionInfo};
+use super::tmux;
 
 /// Manages multiple PTY sessions.
 ///
@@ -44,7 +44,7 @@ impl PtyManager {
 
     /// Create a new PTY session.
     ///
-    /// Spawns a PTY with the given shell (or the configured default),
+    /// Spawns a tmux-backed PTY with an optional working directory,
     /// starts a background output reader, and publishes a
     /// `ControlEvent::SessionCreated` event.
     ///
@@ -52,29 +52,20 @@ impl PtyManager {
     pub async fn create_session(
         &self,
         name: &str,
-        shell: Option<&str>,
-        cwd: Option<&Path>,
+        cwd: Option<&std::path::Path>,
     ) -> Result<String> {
         let id_length = self.config.session.session_id_length;
         let session_id = nanoid::nanoid!(id_length);
 
-        let shell = shell.unwrap_or(&self.config.server.shell);
-        let buffer_capacity = self.config.session.buffer_size;
-
-        let coalesce_ms = self.config.session.output_coalesce_ms;
-        let session = PtySession::spawn_with_coalesce(
+        let session = PtySession::spawn(
             session_id.clone(),
             name.to_string(),
-            shell,
             cwd,
-            self.event_bus.clone(),
-            buffer_capacity,
-            coalesce_ms,
         )?;
 
         self.sessions.insert(session_id.clone(), session);
 
-        info!(session_id = %session_id, name = %name, shell = %shell, "created PTY session");
+        info!(session_id = %session_id, name = %name, "created PTY session");
 
         self.event_bus.publish_control(ControlEvent::SessionCreated {
             session_id: session_id.clone(),
@@ -232,5 +223,15 @@ impl PtyManager {
     /// Return the number of active sessions.
     pub fn session_count(&self) -> usize {
         self.sessions.len()
+    }
+
+    /// Kill any orphaned RTB tmux sessions that are not tracked by this manager.
+    ///
+    /// This is called at startup to clean up tmux sessions left behind by
+    /// a previous server instance that crashed or was killed without cleanup.
+    pub fn cleanup_orphans(&self) {
+        if let Err(e) = tmux::cleanup_orphans() {
+            tracing::warn!(error = %e, "failed to cleanup orphan tmux sessions");
+        }
     }
 }

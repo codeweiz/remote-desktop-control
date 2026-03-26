@@ -12,15 +12,12 @@ use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, warn};
 
 use crate::state::AppState;
-use rtb_core::events::DataEvent;
 
 /// Query parameters for the terminal WebSocket endpoint.
 #[derive(Debug, Deserialize)]
 pub struct TerminalParams {
     pub session: String,
     pub token: String,
-    /// If provided, replay missed events from the ring buffer starting after this sequence.
-    pub last_seq: Option<u64>,
 }
 
 /// JSON command from the client (text frames).
@@ -61,94 +58,37 @@ pub async fn ws_terminal(
             .into_response();
     }
 
-    let last_seq = params.last_seq;
-
-    // 5. Upgrade to WebSocket
-    ws.on_upgrade(move |socket| handle_terminal(socket, state, session_id, last_seq))
+    // 3. Upgrade to WebSocket
+    ws.on_upgrade(move |socket| handle_terminal(socket, state, session_id))
 }
 
 /// Main terminal WebSocket loop after upgrade.
+///
+/// Subscribes to the PTY session's live broadcast channel and forwards
+/// output to the WebSocket. Client input (binary frames) is written to
+/// the PTY's stdin. JSON text frames are parsed as commands (e.g. resize).
+///
+/// NOTE: This implementation will be fully rewritten in Task 5 to use the
+/// new binary WebSocket protocol. For now, it uses base64 encoding to keep
+/// the existing frontend working.
 async fn handle_terminal(
     socket: WebSocket,
     state: AppState,
     session_id: String,
-    last_seq: Option<u64>,
 ) {
-    info!(session_id = %session_id, last_seq = ?last_seq, "terminal WebSocket connected");
+    info!(session_id = %session_id, "terminal WebSocket connected");
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    // 3. Subscribe to session data channel via EventBus
-    let mut data_rx = state.core.event_bus.create_data_subscriber(&session_id);
-
-    // 4. If last_seq provided, replay missed events from ring buffer.
-    //    If the requested seq is older than the ring buffer's oldest entry,
-    //    send a replay_gap indicator first so the client knows about the gap.
-    if let Some(seq) = last_seq {
-        if let Some(session) = state.core.pty_manager.get_session(&session_id) {
-            let ring = session.buffer();
-
-            // Detect gap: if the client's last_seq is before the ring buffer's
-            // oldest entry, there are events we can no longer replay.
-            if let Some(first_available) = ring.first_seq() {
-                if seq < first_available.saturating_sub(1) {
-                    let gap_msg = serde_json::json!({
-                        "type": "replay_gap",
-                        "missed_from": seq,
-                        "available_from": first_available,
-                    });
-                    if ws_tx
-                        .send(Message::Text(gap_msg.to_string().into()))
-                        .await
-                        .is_err()
-                    {
-                        warn!(session_id = %session_id, "failed to send replay_gap, closing");
-                        return;
-                    }
-                    debug!(
-                        session_id = %session_id,
-                        missed_from = seq,
-                        available_from = first_available,
-                        "sent replay_gap indicator"
-                    );
-                }
-            }
-
-            let missed = ring.get_since(seq);
-            let mut replayed_last_seq = seq;
-
-            for (event_seq, data) in missed {
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-                let msg = serde_json::json!({
-                    "type": "output",
-                    "seq": event_seq,
-                    "data": b64,
-                });
-                if ws_tx
-                    .send(Message::Text(msg.to_string().into()))
-                    .await
-                    .is_err()
-                {
-                    warn!(session_id = %session_id, "failed to send replay data, closing");
-                    return;
-                }
-                replayed_last_seq = event_seq;
-            }
-
-            // Send replay_done marker
-            let done_msg = serde_json::json!({
-                "type": "replay_done",
-                "last_seq": replayed_last_seq,
-            });
-            if ws_tx
-                .send(Message::Text(done_msg.to_string().into()))
-                .await
-                .is_err()
-            {
-                return;
-            }
+    // Subscribe to live output from the PTY session's broadcast channel
+    let session = match state.core.pty_manager.get_session(&session_id) {
+        Some(s) => s,
+        None => {
+            warn!(session_id = %session_id, "session disappeared before WebSocket setup");
+            return;
         }
-    }
+    };
+    let mut live_rx = session.subscribe();
 
     // Heartbeat: ping every 30 seconds
     let mut ping_interval = interval(Duration::from_secs(30));
@@ -202,14 +142,13 @@ async fn handle_terminal(
                 }
             }
 
-            // Outgoing data event from the PTY
-            event = data_rx.recv() => {
-                match event {
-                    Some(DataEvent::PtyOutput { seq, data }) => {
+            // Live output from the PTY broadcast channel
+            result = live_rx.recv() => {
+                match result {
+                    Ok(data) => {
                         let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
                         let msg = serde_json::json!({
                             "type": "output",
-                            "seq": seq,
                             "data": b64,
                         });
                         if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
@@ -217,21 +156,18 @@ async fn handle_terminal(
                             break;
                         }
                     }
-                    Some(DataEvent::PtyExited { exit_code }) => {
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(session_id = %session_id, skipped = n, "WebSocket consumer lagged, some output lost");
+                        // Continue — we'll catch up with the next message
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // PTY session ended — the broadcast sender was dropped
+                        debug!(session_id = %session_id, "PTY broadcast channel closed, closing WebSocket");
                         let msg = serde_json::json!({
                             "type": "exit",
-                            "code": exit_code,
+                            "code": 0,
                         });
                         let _ = ws_tx.send(Message::Text(msg.to_string().into())).await;
-                        info!(session_id = %session_id, exit_code, "PTY exited, closing WebSocket");
-                        break;
-                    }
-                    Some(_) => {
-                        // Ignore other data events (agent messages, etc.)
-                    }
-                    None => {
-                        // Data channel closed (session removed)
-                        debug!(session_id = %session_id, "data channel closed, closing WebSocket");
                         break;
                     }
                 }

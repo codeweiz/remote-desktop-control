@@ -30,6 +30,8 @@ pub struct CoreState {
 impl CoreState {
     /// Initialize all core components from config.
     pub fn new(config: config::Config) -> anyhow::Result<Self> {
+        crate::pty::tmux::validate_tmux()?;
+
         let config = Arc::new(config);
         let event_bus = Arc::new(event_bus::EventBus::new());
 

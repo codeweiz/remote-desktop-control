@@ -71,7 +71,7 @@ pub async fn get_sessions(state: State<'_, DaemonStateRef>) -> Result<serde_json
 pub async fn create_session(
     state: State<'_, DaemonStateRef>,
     name: Option<String>,
-    shell: Option<String>,
+    #[allow(unused)] shell: Option<String>,
     cwd: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let s = state.read().await;
@@ -82,7 +82,6 @@ pub async fn create_session(
             .pty_manager
             .create_session(
                 &session_name,
-                shell.as_deref(),
                 cwd_path.as_deref(),
             )
             .await
@@ -167,6 +166,9 @@ pub async fn start_embedded_daemon(app: AppHandle) -> anyhow::Result<()> {
 
     // Initialize core state
     let core = Arc::new(CoreState::new(config.clone())?);
+
+    // Clean up any orphan tmux sessions from a previous crash
+    core.pty_manager.cleanup_orphans();
 
     // Load persisted tasks
     if let Err(e) = core.task_pool.load().await {
