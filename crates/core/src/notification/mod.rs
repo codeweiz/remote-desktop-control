@@ -40,19 +40,11 @@ pub enum NotifyTrigger {
         error_text: Option<String>,
     },
     /// An agent task completed.
-    AgentCompleted {
-        session_id: String,
-    },
+    AgentCompleted { session_id: String },
     /// An agent needs human approval for a tool use.
-    AgentNeedsApproval {
-        session_id: String,
-        tool: String,
-    },
+    AgentNeedsApproval { session_id: String, tool: String },
     /// An agent encountered an error.
-    AgentError {
-        session_id: String,
-        error: String,
-    },
+    AgentError { session_id: String, error: String },
 }
 
 /// Types of prompts detected by the semantic layer.

@@ -165,8 +165,14 @@ fn test_corrupted_last_line() {
         .expect("open events file");
     writeln!(file, "{{this is not valid json").expect("write corrupt line");
 
-    let events = store.read_all_events("corruptsess").expect("read with corrupt");
-    assert_eq!(events.len(), 3, "should skip corrupt line and return 3 valid events");
+    let events = store
+        .read_all_events("corruptsess")
+        .expect("read with corrupt");
+    assert_eq!(
+        events.len(),
+        3,
+        "should skip corrupt line and return 3 valid events"
+    );
 }
 
 #[test]

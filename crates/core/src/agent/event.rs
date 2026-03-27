@@ -26,8 +26,10 @@ impl AgentKind {
     pub fn acp_args(&self) -> Vec<&str> {
         match self {
             AgentKind::Claude => vec![
-                "--input-format", "stream-json",
-                "--output-format", "stream-json",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
                 "--verbose",
                 "--dangerously-skip-permissions",
             ],

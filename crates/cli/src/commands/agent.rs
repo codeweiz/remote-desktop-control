@@ -59,10 +59,7 @@ fn new_agent(
     }
 
     let body: serde_json::Value = resp.json().context("invalid JSON from daemon")?;
-    let id = body
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
+    let id = body.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
     println!("Agent session created: {}", id);
 
     Ok(())

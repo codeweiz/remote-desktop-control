@@ -206,7 +206,9 @@ impl Task {
 
     /// Check if all dependencies are satisfied.
     pub fn deps_satisfied(&self, completed_ids: &[TaskId]) -> bool {
-        self.depends_on.iter().all(|dep| completed_ids.contains(dep))
+        self.depends_on
+            .iter()
+            .all(|dep| completed_ids.contains(dep))
     }
 
     /// Whether this task is in a terminal state.

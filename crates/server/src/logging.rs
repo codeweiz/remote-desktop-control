@@ -14,9 +14,7 @@ use axum::{
 };
 use rtb_core::config::Config;
 use tracing_appender::rolling;
-use tracing_subscriber::{
-    fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
-};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 /// Initialize the global tracing subscriber.
 ///
@@ -26,8 +24,8 @@ use tracing_subscriber::{
 ///
 /// This must be called exactly once, before any tracing macros are used.
 pub fn setup_logging(config: &Config) -> anyhow::Result<()> {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&config.logging.level));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.logging.level));
 
     // Resolve access log directory and file name from config
     let access_log_path = &config.logging.access_log;
@@ -46,9 +44,7 @@ pub fn setup_logging(config: &Config) -> anyhow::Result<()> {
     // custom appender.
     let file_layer = if !access_log_path.is_empty() {
         let log_path = Path::new(access_log_path);
-        let log_dir = log_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."));
+        let log_dir = log_path.parent().unwrap_or_else(|| Path::new("."));
         let log_filename = log_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -56,7 +52,11 @@ pub fn setup_logging(config: &Config) -> anyhow::Result<()> {
 
         // Create log directory if it doesn't exist
         if let Err(e) = std::fs::create_dir_all(log_dir) {
-            eprintln!("Warning: could not create log directory {}: {}", log_dir.display(), e);
+            eprintln!(
+                "Warning: could not create log directory {}: {}",
+                log_dir.display(),
+                e
+            );
             None
         } else {
             // Use daily rolling appender for automatic log rotation.
@@ -80,9 +80,7 @@ pub fn setup_logging(config: &Config) -> anyhow::Result<()> {
     };
 
     // Console layer for application logs
-    let console_layer = fmt::layer()
-        .with_target(false)
-        .with_filter(filter);
+    let console_layer = fmt::layer().with_target(false).with_filter(filter);
 
     tracing_subscriber::registry()
         .with(console_layer)
@@ -95,10 +93,7 @@ pub fn setup_logging(config: &Config) -> anyhow::Result<()> {
 /// Axum middleware that logs structured access information for each request.
 ///
 /// Logs: timestamp, client IP, HTTP method, path, response status, latency (ms).
-pub async fn access_log_middleware(
-    request: Request<Body>,
-    next: Next,
-) -> Response<Body> {
+pub async fn access_log_middleware(request: Request<Body>, next: Next) -> Response<Body> {
     let start = Instant::now();
     let method = request.method().clone();
     let path = request.uri().path().to_string();

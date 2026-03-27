@@ -71,15 +71,14 @@ fn rotate_token() -> Result<()> {
                     println!("The token file has been updated. Restart the daemon to apply.");
                 }
                 Err(e) => {
-                    println!(
-                        "Warning: could not reach daemon to rotate token: {}",
-                        e
-                    );
+                    println!("Warning: could not reach daemon to rotate token: {}", e);
                     println!("The token file has been updated. Restart the daemon to apply.");
                 }
             }
         } else {
-            println!("Warning: could not read old token. Restart the daemon to apply the new token.");
+            println!(
+                "Warning: could not read old token. Restart the daemon to apply the new token."
+            );
         }
     } else {
         println!("Daemon is not running. New token will take effect on next start.");

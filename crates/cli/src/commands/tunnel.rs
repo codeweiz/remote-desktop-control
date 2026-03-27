@@ -92,10 +92,7 @@ fn tunnel_status(base_url: &str, token: &str) -> Result<()> {
         .get("active")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let message = body
-        .get("message")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let message = body.get("message").and_then(|v| v.as_str()).unwrap_or("");
     let tunnel_url = body.get("url").and_then(|v| v.as_str());
     let provider = body.get("provider").and_then(|v| v.as_str());
 

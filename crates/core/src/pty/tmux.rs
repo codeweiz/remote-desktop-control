@@ -80,10 +80,7 @@ pub fn validate_tmux() -> Result<()> {
 
     info!(
         major,
-        minor,
-        "tmux version validated (>= {}.{})",
-        MIN_TMUX_VERSION.0,
-        MIN_TMUX_VERSION.1,
+        minor, "tmux version validated (>= {}.{})", MIN_TMUX_VERSION.0, MIN_TMUX_VERSION.1,
     );
     Ok(())
 }
@@ -91,7 +88,10 @@ pub fn validate_tmux() -> Result<()> {
 /// Parse a version string like "3.4" or "2.6a" into (major, minor).
 fn parse_version(s: &str) -> Result<(u32, u32)> {
     // Strip any trailing letter suffix (e.g. "3.3a" -> "3.3")
-    let cleaned: String = s.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    let cleaned: String = s
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
     let mut parts = cleaned.split('.');
     let major: u32 = parts
         .next()

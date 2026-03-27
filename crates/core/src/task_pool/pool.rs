@@ -190,11 +190,7 @@ impl TaskPool {
     }
 
     /// Set the session ID for a running task.
-    pub async fn set_session_id(
-        &self,
-        id: &str,
-        session_id: String,
-    ) -> Result<(), TaskPoolError> {
+    pub async fn set_session_id(&self, id: &str, session_id: String) -> Result<(), TaskPoolError> {
         let mut tasks = self.tasks.write().await;
         let task = tasks
             .iter_mut()
@@ -219,11 +215,7 @@ impl TaskPool {
     }
 
     /// Set the result for a completed/failed task.
-    pub async fn set_result(
-        &self,
-        id: &str,
-        result: TaskResult,
-    ) -> Result<(), TaskPoolError> {
+    pub async fn set_result(&self, id: &str, result: TaskResult) -> Result<(), TaskPoolError> {
         let mut tasks = self.tasks.write().await;
         let task = tasks
             .iter_mut()
@@ -242,7 +234,11 @@ impl TaskPool {
     pub async fn list(&self, status_filter: Option<&TaskStatus>) -> Vec<Task> {
         let tasks = self.tasks.read().await;
         match status_filter {
-            Some(status) => tasks.iter().filter(|t| t.status == *status).cloned().collect(),
+            Some(status) => tasks
+                .iter()
+                .filter(|t| t.status == *status)
+                .cloned()
+                .collect(),
             None => tasks.clone(),
         }
     }
@@ -338,7 +334,10 @@ impl TaskPool {
     /// Get the number of currently running tasks.
     pub async fn running_count(&self) -> usize {
         let tasks = self.tasks.read().await;
-        tasks.iter().filter(|t| t.status == TaskStatus::Running).count()
+        tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Running)
+            .count()
     }
 
     /// Get the total number of tasks.
@@ -470,8 +469,12 @@ mod tests {
         assert_eq!(next.id, parent_id);
 
         // Complete the parent
-        pool.update_status(&parent_id, TaskStatus::Running).await.unwrap();
-        pool.update_status(&parent_id, TaskStatus::Completed).await.unwrap();
+        pool.update_status(&parent_id, TaskStatus::Running)
+            .await
+            .unwrap();
+        pool.update_status(&parent_id, TaskStatus::Completed)
+            .await
+            .unwrap();
 
         // Now child should be unblocked and executable
         let child = pool.get(&child_id).await.unwrap();
@@ -492,7 +495,9 @@ mod tests {
         pool.update_status(&id, TaskStatus::Running).await.unwrap();
 
         // Valid: Running -> Completed
-        pool.update_status(&id, TaskStatus::Completed).await.unwrap();
+        pool.update_status(&id, TaskStatus::Completed)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

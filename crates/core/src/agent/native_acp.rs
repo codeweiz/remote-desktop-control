@@ -46,9 +46,7 @@ fn write_system_prompt(
                 .map_err(|e| format!("Failed to write Codex instructions.md: {e}"))?;
             Ok(None)
         }
-        AgentKind::Claude => {
-            Err("Claude should use claude_bridge, not native_acp".into())
-        }
+        AgentKind::Claude => Err("Claude should use claude_bridge, not native_acp".into()),
     }
 }
 
@@ -85,10 +83,7 @@ pub fn spawn_native_acp(
     let binary = kind.binary();
     let args = kind.acp_args();
 
-    eprintln!(
-        "[native-acp] spawning {} {:?} in {:?}",
-        binary, args, cwd
-    );
+    eprintln!("[native-acp] spawning {} {:?} in {:?}", binary, args, cwd);
 
     let mut cmd = tokio::process::Command::new(binary);
     cmd.args(&args)
@@ -107,11 +102,7 @@ pub fn spawn_native_acp(
         .spawn()
         .map_err(|e| format!("Failed to spawn {binary}: {e}. Is {binary} installed?"))?;
 
-    eprintln!(
-        "[native-acp] {} process spawned pid={:?}",
-        kind,
-        child.id()
-    );
+    eprintln!("[native-acp] {} process spawned pid={:?}", kind, child.id());
 
     let child_stdout = child
         .stdout

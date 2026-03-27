@@ -56,7 +56,12 @@ pub fn load_or_create_token(config: &Config) -> Result<String> {
 pub fn read_token(config: &Config) -> Result<String> {
     let token_path = expand_tilde(&config.security.token_file);
     let token = std::fs::read_to_string(&token_path)
-        .with_context(|| format!("cannot read token file {} – is the daemon running?", token_path))?
+        .with_context(|| {
+            format!(
+                "cannot read token file {} – is the daemon running?",
+                token_path
+            )
+        })?
         .trim()
         .to_string();
     if token.is_empty() {
@@ -151,7 +156,10 @@ pub fn print_status() -> Result<()> {
         if process_alive(pid) {
             println!("RTB daemon is running (PID {}).", pid);
         } else {
-            println!("RTB daemon is NOT running (stale PID file for PID {}).", pid);
+            println!(
+                "RTB daemon is NOT running (stale PID file for PID {}).",
+                pid
+            );
         }
     } else {
         println!("RTB daemon is NOT running.");
@@ -214,8 +222,8 @@ pub fn restore_sessions() -> Result<()> {
         return Ok(());
     }
 
-    let store = SessionStore::new(sessions_dir)
-        .context("failed to open session store for restore")?;
+    let store =
+        SessionStore::new(sessions_dir).context("failed to open session store for restore")?;
 
     let sessions = store.list().unwrap_or_default();
     let mut exited_count = 0u32;

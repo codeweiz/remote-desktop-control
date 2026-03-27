@@ -37,7 +37,11 @@ pub struct JsonRpcRequest {
 
 impl JsonRpcRequest {
     /// Create a new JSON-RPC request.
-    pub fn new(id: RequestId, method: impl Into<String>, params: Option<serde_json::Value>) -> Self {
+    pub fn new(
+        id: RequestId,
+        method: impl Into<String>,
+        params: Option<serde_json::Value>,
+    ) -> Self {
         Self {
             jsonrpc: JSONRPC_VERSION.to_string(),
             method: method.into(),

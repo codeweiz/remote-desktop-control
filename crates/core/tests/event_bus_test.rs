@@ -1,6 +1,6 @@
+use bytes::Bytes;
 use rtb_core::event_bus::EventBus;
 use rtb_core::events::{ControlEvent, DataEvent, SessionType};
-use bytes::Bytes;
 
 #[tokio::test]
 async fn test_broadcast_control_event() {
@@ -14,7 +14,10 @@ async fn test_broadcast_control_event() {
 
     let event = rx.recv().await.expect("should receive control event");
     match event.as_ref() {
-        ControlEvent::SessionCreated { session_id, session_type } => {
+        ControlEvent::SessionCreated {
+            session_id,
+            session_type,
+        } => {
             assert_eq!(session_id, "s1");
             assert!(matches!(session_type, SessionType::Terminal));
         }
@@ -109,12 +112,12 @@ async fn test_remove_session_cleans_up() {
     let mut rx = bus.create_data_subscriber("session-x");
 
     // Publish something first to confirm the channel works
-    bus.publish_data(
-        "session-x",
-        DataEvent::PtyExited { exit_code: 0 },
-    )
-    .await;
-    let _ = rx.recv().await.expect("should receive event before removal");
+    bus.publish_data("session-x", DataEvent::PtyExited { exit_code: 0 })
+        .await;
+    let _ = rx
+        .recv()
+        .await
+        .expect("should receive event before removal");
 
     // Remove the session
     bus.remove_session("session-x");
@@ -155,7 +158,10 @@ async fn test_dead_sender_cleanup() {
     .await;
 
     // The surviving subscriber should still receive the event
-    let event = rx2.recv().await.expect("surviving subscriber should receive event");
+    let event = rx2
+        .recv()
+        .await
+        .expect("surviving subscriber should receive event");
     match event {
         DataEvent::PtyOutput { seq, data } => {
             assert_eq!(seq, 42);

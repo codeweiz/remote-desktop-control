@@ -70,7 +70,10 @@ pub async fn enable_plugin(
             (
                 StatusCode::OK,
                 Json(MessageBody {
-                    message: format!("Plugin '{}' enable requested (restart daemon to apply)", name),
+                    message: format!(
+                        "Plugin '{}' enable requested (restart daemon to apply)",
+                        name
+                    ),
                 }),
             )
                 .into_response()

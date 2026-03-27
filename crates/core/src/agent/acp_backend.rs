@@ -58,11 +58,7 @@ impl AcpBackend {
 
     /// Spawn the dedicated ACP thread, perform Initialize + NewSession, and
     /// return once the handshake succeeds (or an error is reported).
-    pub async fn start(
-        &mut self,
-        cwd: &Path,
-        system_prompt: Option<&str>,
-    ) -> Result<(), String> {
+    pub async fn start(&mut self, cwd: &Path, system_prompt: Option<&str>) -> Result<(), String> {
         let cwd = cwd.to_path_buf();
         let event_tx = self.event_tx.clone();
         let kind = self.kind.clone();
@@ -80,12 +76,7 @@ impl AcpBackend {
         self.cmd_tx = Some(cmd_tx);
         self.thread_handle = Some(handle);
 
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            ready_rx,
-        )
-        .await
-        {
+        match tokio::time::timeout(std::time::Duration::from_secs(15), ready_rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err("ACP thread died during init".to_string()),
             Err(_) => Err("ACP initialization timed out after 15s".to_string()),
@@ -172,8 +163,7 @@ fn run_acp_thread(
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async move {
-                match acp_session_loop(kind, cwd, event_tx, cmd_rx, ready_tx, system_prompt).await
-                {
+                match acp_session_loop(kind, cwd, event_tx, cmd_rx, ready_tx, system_prompt).await {
                     Ok(()) => {}
                     Err(e) => tracing::error!("[{}-acp] session loop error: {}", kind_name, e),
                 }
@@ -196,8 +186,8 @@ async fn acp_session_loop(
     ready_tx: oneshot::Sender<Result<(), String>>,
     system_prompt: Option<String>,
 ) -> Result<(), String> {
-    use agent_client_protocol as acp;
     use acp::Agent as _;
+    use agent_client_protocol as acp;
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
     // --- Obtain read/write streams depending on agent kind -------------------
@@ -216,11 +206,8 @@ async fn acp_session_loop(
         }
         _ => {
             tracing::info!("[{}-acp] step: spawning native ACP subprocess", kind);
-            let (r, w) = super::native_acp::spawn_native_acp(
-                &kind,
-                &cwd,
-                system_prompt.as_deref(),
-            )?;
+            let (r, w) =
+                super::native_acp::spawn_native_acp(&kind, &cwd, system_prompt.as_deref())?;
             tracing::info!("[{}-acp] step: native ACP subprocess spawned", kind);
             (r, w, None)
         }
@@ -240,7 +227,10 @@ async fn acp_session_loop(
         },
     );
     tokio::task::spawn_local(handle_io);
-    tracing::info!("[{}-acp] step: ClientSideConnection created, IO task spawned", kind);
+    tracing::info!(
+        "[{}-acp] step: ClientSideConnection created, IO task spawned",
+        kind
+    );
 
     // --- Initialize ----------------------------------------------------------
     tracing::info!("[{}-acp] step: sending initialize request...", kind);
@@ -408,9 +398,11 @@ impl agent_client_protocol::Client for SharedAcpClientHandler {
                         update.fields.status.as_ref(),
                         Some(agent_client_protocol::ToolCallStatus::Failed)
                     );
-                    let _ = self
-                        .event_tx
-                        .send(AgentEvent::ToolResult { id, output, is_error });
+                    let _ = self.event_tx.send(AgentEvent::ToolResult {
+                        id,
+                        output,
+                        is_error,
+                    });
                 } else {
                     // Tool use start / progress
                     let input = update.fields.raw_input.as_ref().map(|v| {
@@ -420,9 +412,7 @@ impl agent_client_protocol::Client for SharedAcpClientHandler {
                             v.to_string()
                         }
                     });
-                    let _ = self
-                        .event_tx
-                        .send(AgentEvent::ToolUse { name, id, input });
+                    let _ = self.event_tx.send(AgentEvent::ToolUse { name, id, input });
                 }
             }
             _ => {}

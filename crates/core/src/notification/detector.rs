@@ -15,9 +15,7 @@ use std::time::{Duration, Instant};
 
 use tracing::debug;
 
-use super::{
-    DetectionLayer, DetectionSignal, NotifyTrigger, PromptType, FUSION_THRESHOLD,
-};
+use super::{DetectionLayer, DetectionSignal, NotifyTrigger, PromptType, FUSION_THRESHOLD};
 
 // ---------------------------------------------------------------------------
 // Layer 1: Process Monitor
@@ -86,7 +84,12 @@ impl ProcessMonitor {
     }
 
     /// Notify the monitor that a process exited with a specific code.
-    pub fn process_exited(&mut self, exit_code: i32, command: Option<String>, duration_secs: f64) -> DetectionSignal {
+    pub fn process_exited(
+        &mut self,
+        exit_code: i32,
+        command: Option<String>,
+        duration_secs: f64,
+    ) -> DetectionSignal {
         self.shell_is_foreground = true;
         DetectionSignal {
             layer: DetectionLayer::ProcessMonitor,
@@ -230,7 +233,8 @@ impl TimingDetector {
 
     /// Get the time since last output, if any.
     pub fn silence_duration(&self) -> Option<Duration> {
-        self.last_output.map(|last| Instant::now().duration_since(last))
+        self.last_output
+            .map(|last| Instant::now().duration_since(last))
     }
 }
 

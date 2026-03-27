@@ -73,12 +73,13 @@ fn api_routes() -> Router<AppState> {
 /// - Auth (API routes only; WS routes validate tokens themselves)
 pub fn create_router(state: AppState) -> Router {
     // REST API routes that require auth middleware
-    let authed_api = Router::new()
-        .nest("/api/v1", api_routes())
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth_middleware,
-        ));
+    let authed_api =
+        Router::new()
+            .nest("/api/v1", api_routes())
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                auth_middleware,
+            ));
 
     // WebSocket routes handle their own token validation via query params,
     // so they bypass the auth middleware (which would redirect on token= queries).

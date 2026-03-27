@@ -20,9 +20,12 @@ pub async fn rotate_token(
     let new_token = body.new_token.trim().to_string();
 
     if new_token.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "error": "new_token must not be empty"
-        })));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "new_token must not be empty"
+            })),
+        );
     }
 
     // Update the in-memory token
@@ -37,8 +40,11 @@ pub async fn rotate_token(
         "Authentication token rotated"
     );
 
-    (StatusCode::OK, Json(serde_json::json!({
-        "status": "rotated",
-        "message": "Token rotated successfully. Use the new token for subsequent requests."
-    })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "rotated",
+            "message": "Token rotated successfully. Use the new token for subsequent requests."
+        })),
+    )
 }

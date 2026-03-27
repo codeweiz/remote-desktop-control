@@ -83,9 +83,7 @@ impl EventIndex {
             return 0;
         }
         // Binary search for the last entry with seq <= target_seq
-        let pos = self
-            .entries
-            .partition_point(|e| e.seq <= target_seq);
+        let pos = self.entries.partition_point(|e| e.seq <= target_seq);
         if pos == 0 {
             return 0;
         }
@@ -390,10 +388,7 @@ impl SessionStore {
     }
 
     /// Read and parse events.jsonl, skipping malformed lines.
-    fn read_events_raw(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<SessionEvent>, SessionStoreError> {
+    fn read_events_raw(&self, session_id: &str) -> Result<Vec<SessionEvent>, SessionStoreError> {
         let path = self.events_path(session_id);
         if !path.exists() {
             return Ok(Vec::new());

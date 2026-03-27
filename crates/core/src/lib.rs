@@ -47,9 +47,7 @@ impl CoreState {
             Arc::clone(&config),
         ));
 
-        let agent_manager = Arc::new(agent::manager::AgentManager::new(
-            Arc::clone(&event_bus),
-        ));
+        let agent_manager = Arc::new(agent::manager::AgentManager::new(Arc::clone(&event_bus)));
 
         // Task pool backed by ~/.rtb/tasks.jsonl
         let tasks_path = config::Config::rtb_dir()
@@ -75,9 +73,8 @@ impl CoreState {
         pty_manager.set_notification_router(Arc::clone(&notification_router));
 
         // Task dispatcher: auto-assigns pending tasks to idle agents.
-        let scheduler_config = task_pool::scheduler::SchedulerConfig::from_pool_config(
-            &config.task_pool,
-        );
+        let scheduler_config =
+            task_pool::scheduler::SchedulerConfig::from_pool_config(&config.task_pool);
         let dispatcher = task_pool::scheduler::TaskDispatcher::new(
             scheduler_config,
             Arc::clone(&task_pool),

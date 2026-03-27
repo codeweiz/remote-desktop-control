@@ -32,10 +32,7 @@ fn add_task(
     let url = format!("{}/api/v1/tasks", base_url);
 
     let mut body = serde_json::Map::new();
-    body.insert(
-        "title".into(),
-        serde_json::Value::String(title.to_string()),
-    );
+    body.insert("title".into(), serde_json::Value::String(title.to_string()));
     if let Some(p) = priority {
         body.insert("priority".into(), serde_json::Value::String(p.clone()));
     }
@@ -64,10 +61,7 @@ fn add_task(
     }
 
     let body: serde_json::Value = resp.json().context("invalid JSON from daemon")?;
-    let id = body
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
+    let id = body.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
     let status = body
         .get("status")
         .and_then(|v| v.as_str())
@@ -95,10 +89,7 @@ fn list_tasks(base_url: &str, token: &str) -> Result<()> {
         if tasks.is_empty() {
             println!("No tasks.");
         } else {
-            println!(
-                "{:<14} {:<30} {:<4} {:<12}",
-                "ID", "NAME", "PRI", "STATUS"
-            );
+            println!("{:<14} {:<30} {:<4} {:<12}", "ID", "NAME", "PRI", "STATUS");
             println!("{}", "-".repeat(64));
             for t in tasks {
                 let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("-");

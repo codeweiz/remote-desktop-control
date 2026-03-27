@@ -44,7 +44,10 @@ async fn test_create_pty_session() {
     assert!(session.is_running());
 
     // Cleanup
-    manager.kill_session(&session_id).await.expect("should kill session");
+    manager
+        .kill_session(&session_id)
+        .await
+        .expect("should kill session");
 }
 
 #[tokio::test]
@@ -60,7 +63,9 @@ async fn test_pty_output() {
         .expect("should create session");
 
     // Subscribe to live output from the session's broadcast channel
-    let session = manager.get_session(&session_id).expect("session should exist");
+    let session = manager
+        .get_session(&session_id)
+        .expect("session should exist");
     let mut rx = session.subscribe();
 
     // Give the shell a moment to start up, then send the echo command.
@@ -86,7 +91,10 @@ async fn test_pty_output() {
                     let text = String::from_utf8_lossy(&data);
                     if text.contains("hello") {
                         // Cleanup
-                        manager.kill_session(&session_id).await.expect("should kill session");
+                        manager
+                            .kill_session(&session_id)
+                            .await
+                            .expect("should kill session");
                         return; // PASS
                     }
                 }
@@ -172,7 +180,10 @@ async fn test_pty_resize() {
         .expect("should resize session");
 
     // Cleanup
-    manager.kill_session(&session_id).await.expect("should kill session");
+    manager
+        .kill_session(&session_id)
+        .await
+        .expect("should kill session");
 }
 
 #[tokio::test]
@@ -192,5 +203,8 @@ async fn test_write_nonexistent_session() {
     let manager = PtyManager::new(event_bus, config);
 
     let result = manager.write_input("nonexistent", b"hello");
-    assert!(result.is_err(), "writing to nonexistent session should fail");
+    assert!(
+        result.is_err(),
+        "writing to nonexistent session should fail"
+    );
 }

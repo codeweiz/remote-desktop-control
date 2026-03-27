@@ -23,10 +23,22 @@ use tokio::sync::{mpsc, Mutex};
 /// A content block from a Claude `assistant` message.
 #[derive(Debug, Clone)]
 pub enum ContentBlock {
-    Text { text: String },
-    Thinking { text: String },
-    ToolUse { id: String, name: String, input: Option<String> },
-    ToolResult { id: String, output: Option<String>, is_error: bool },
+    Text {
+        text: String,
+    },
+    Thinking {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Option<String>,
+    },
+    ToolResult {
+        id: String,
+        output: Option<String>,
+        is_error: bool,
+    },
 }
 
 /// Events emitted by the Claude CLI, parsed from stdout NDJSON.
@@ -73,8 +85,10 @@ impl ClaudeSdk {
         resume_session_id: Option<&str>,
     ) -> Result<Self, String> {
         let mut args = vec![
-            "--input-format".to_string(), "stream-json".to_string(),
-            "--output-format".to_string(), "stream-json".to_string(),
+            "--input-format".to_string(),
+            "stream-json".to_string(),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
             "--verbose".to_string(),
             "--dangerously-skip-permissions".to_string(),
         ];
@@ -108,8 +122,12 @@ impl ClaudeSdk {
         tokio::task::spawn_local(async move {
             while let Some(line) = write_rx.recv().await {
                 let mut w = stdin_w.lock().await;
-                if w.write_all(line.as_bytes()).await.is_err() { break; }
-                if w.write_all(b"\n").await.is_err() { break; }
+                if w.write_all(line.as_bytes()).await.is_err() {
+                    break;
+                }
+                if w.write_all(b"\n").await.is_err() {
+                    break;
+                }
                 let _ = w.flush().await;
             }
         });
@@ -120,7 +138,9 @@ impl ClaudeSdk {
             "request_id": "req_init_1",
             "request": { "subtype": "initialize", "hooks": null, "agents": null }
         });
-        write_tx.send(init_msg.to_string()).await
+        write_tx
+            .send(init_msg.to_string())
+            .await
             .map_err(|e| format!("Failed to send init: {}", e))?;
 
         // Reader task: parses stdout NDJSON -> SdkEvent
@@ -134,7 +154,9 @@ impl ClaudeSdk {
             let mut lines = reader.lines();
 
             while let Ok(Some(line)) = lines.next_line().await {
-                if line.trim().is_empty() { continue; }
+                if line.trim().is_empty() {
+                    continue;
+                }
                 let msg: serde_json::Value = match serde_json::from_str(&line) {
                     Ok(v) => v,
                     Err(_) => continue,
@@ -146,7 +168,9 @@ impl ClaudeSdk {
                     "assistant" => {
                         let blocks = parse_content_blocks(&msg);
                         if !blocks.is_empty() {
-                            let _ = event_tx.send(SdkEvent::AssistantMessage { content: blocks }).await;
+                            let _ = event_tx
+                                .send(SdkEvent::AssistantMessage { content: blocks })
+                                .await;
                         }
                     }
 
@@ -155,13 +179,15 @@ impl ClaudeSdk {
                     }
 
                     "result" => {
-                        let new_sid = msg.get("session_id")
+                        let new_sid = msg
+                            .get("session_id")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string());
                         if let Some(ref s) = new_sid {
                             *session_id_for_reader.lock().await = Some(s.clone());
                         }
-                        let is_error = msg.get("is_error")
+                        let is_error = msg
+                            .get("is_error")
                             .and_then(|v| v.as_bool())
                             .unwrap_or(false);
                         let error_text = if is_error {
@@ -171,21 +197,26 @@ impl ClaudeSdk {
                         } else {
                             None
                         };
-                        let _ = event_tx.send(SdkEvent::TurnResult {
-                            session_id: new_sid,
-                            is_error,
-                            error_text,
-                        }).await;
+                        let _ = event_tx
+                            .send(SdkEvent::TurnResult {
+                                session_id: new_sid,
+                                is_error,
+                                error_text,
+                            })
+                            .await;
                     }
 
                     "system" => {
-                        let sid = msg.get("session_id")
+                        let sid = msg
+                            .get("session_id")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string());
                         if let Some(ref s) = sid {
                             *session_id_for_reader.lock().await = Some(s.clone());
                         }
-                        let _ = event_tx.send(SdkEvent::SystemInit { session_id: sid }).await;
+                        let _ = event_tx
+                            .send(SdkEvent::SystemInit { session_id: sid })
+                            .await;
                     }
 
                     // control_response, user — internal, no event needed
@@ -216,7 +247,9 @@ impl ClaudeSdk {
         if let Some(session_id) = session_id {
             user_msg["session_id"] = serde_json::Value::String(session_id);
         }
-        self.write_tx.send(user_msg.to_string()).await
+        self.write_tx
+            .send(user_msg.to_string())
+            .await
             .map_err(|e| format!("Failed to send user message: {}", e))
     }
 
@@ -252,20 +285,26 @@ fn parse_content_blocks(msg: &serde_json::Value) -> Vec<ContentBlock> {
             match bt {
                 "text" => {
                     if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
-                        blocks.push(ContentBlock::Text { text: text.to_string() });
+                        blocks.push(ContentBlock::Text {
+                            text: text.to_string(),
+                        });
                     }
                 }
                 "thinking" => {
                     if let Some(text) = block.get("thinking").and_then(|v| v.as_str()) {
-                        blocks.push(ContentBlock::Thinking { text: text.to_string() });
+                        blocks.push(ContentBlock::Thinking {
+                            text: text.to_string(),
+                        });
                     }
                 }
                 "tool_use" => {
-                    let name = block.get("name")
+                    let name = block
+                        .get("name")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown")
                         .to_string();
-                    let id = block.get("id")
+                    let id = block
+                        .get("id")
                         .and_then(|v| v.as_str())
                         .unwrap_or("tool_0")
                         .to_string();
@@ -273,17 +312,27 @@ fn parse_content_blocks(msg: &serde_json::Value) -> Vec<ContentBlock> {
                     blocks.push(ContentBlock::ToolUse { id, name, input });
                 }
                 "tool_result" => {
-                    let id = block.get("tool_use_id")
+                    let id = block
+                        .get("tool_use_id")
                         .and_then(|v| v.as_str())
                         .unwrap_or("tool_0")
                         .to_string();
-                    let is_error = block.get("is_error")
+                    let is_error = block
+                        .get("is_error")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
                     let output = block.get("content").map(|v| {
-                        if let Some(s) = v.as_str() { s.to_string() } else { v.to_string() }
+                        if let Some(s) = v.as_str() {
+                            s.to_string()
+                        } else {
+                            v.to_string()
+                        }
                     });
-                    blocks.push(ContentBlock::ToolResult { id, output, is_error });
+                    blocks.push(ContentBlock::ToolResult {
+                        id,
+                        output,
+                        is_error,
+                    });
                 }
                 _ => {}
             }
@@ -299,7 +348,10 @@ async fn handle_control_request(
     event_tx: &mpsc::Sender<SdkEvent>,
 ) {
     let request_id = msg.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
-    let subtype = msg.pointer("/request/subtype").and_then(|v| v.as_str()).unwrap_or("");
+    let subtype = msg
+        .pointer("/request/subtype")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     let response = match subtype {
         "can_use_tool" => serde_json::json!({
@@ -322,5 +374,9 @@ async fn handle_control_request(
     };
 
     let _ = write_tx.send(response.to_string()).await;
-    let _ = event_tx.send(SdkEvent::ControlHandled { subtype: subtype.to_string() }).await;
+    let _ = event_tx
+        .send(SdkEvent::ControlHandled {
+            subtype: subtype.to_string(),
+        })
+        .await;
 }

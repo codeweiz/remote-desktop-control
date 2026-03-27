@@ -284,7 +284,12 @@ pub async fn update_task(
             }
         };
 
-        if let Err(e) = state.core.task_pool.update_priority(&id, new_priority).await {
+        if let Err(e) = state
+            .core
+            .task_pool
+            .update_priority(&id, new_priority)
+            .await
+        {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorBody {
@@ -320,7 +325,7 @@ pub async fn update_task(
             started_at: t.started_at.map(|dt| dt.to_rfc3339()),
             completed_at: t.completed_at.map(|dt| dt.to_rfc3339()),
         })
-            .into_response(),
+        .into_response(),
         None => (
             StatusCode::NOT_FOUND,
             Json(ErrorBody {

@@ -12,10 +12,7 @@ use axum::{
 /// - `Referrer-Policy: strict-origin-when-cross-origin`
 /// - `Permissions-Policy: camera=(), microphone=(), geolocation=()`
 /// - `Content-Security-Policy` (basic policy)
-pub async fn security_headers(
-    request: Request<Body>,
-    next: Next,
-) -> Response<Body> {
+pub async fn security_headers(request: Request<Body>, next: Next) -> Response<Body> {
     let mut response = next.run(request).await;
 
     let headers = response.headers_mut();

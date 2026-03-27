@@ -297,15 +297,15 @@ fn translate_content_block(session_id: &str, block: &ContentBlock) -> acp::Sessi
     match block {
         ContentBlock::Text { text } => acp::SessionNotification::new(
             session_id.to_string(),
-            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
-                acp::ContentBlock::Text(acp::TextContent::new(text)),
-            )),
+            acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(acp::ContentBlock::Text(
+                acp::TextContent::new(text),
+            ))),
         ),
         ContentBlock::Thinking { text } => acp::SessionNotification::new(
             session_id.to_string(),
-            acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(
-                acp::ContentBlock::Text(acp::TextContent::new(text)),
-            )),
+            acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(acp::ContentBlock::Text(
+                acp::TextContent::new(text),
+            ))),
         ),
         ContentBlock::ToolUse { id, name, input } => {
             let mut fields = acp::ToolCallUpdateFields::new().title(name.clone());
@@ -316,10 +316,7 @@ fn translate_content_block(session_id: &str, block: &ContentBlock) -> acp::Sessi
             }
             acp::SessionNotification::new(
                 session_id.to_string(),
-                acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
-                    id.clone(),
-                    fields,
-                )),
+                acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(id.clone(), fields)),
             )
         }
         ContentBlock::ToolResult {
@@ -338,10 +335,7 @@ fn translate_content_block(session_id: &str, block: &ContentBlock) -> acp::Sessi
             }
             acp::SessionNotification::new(
                 session_id.to_string(),
-                acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
-                    id.clone(),
-                    fields,
-                )),
+                acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(id.clone(), fields)),
             )
         }
     }

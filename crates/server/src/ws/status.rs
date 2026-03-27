@@ -31,11 +31,7 @@ pub async fn ws_status(
     // 1. Validate token
     let expected = state.token.read().await.clone();
     if params.token != expected {
-        return (
-            axum::http::StatusCode::UNAUTHORIZED,
-            "Invalid token",
-        )
-            .into_response();
+        return (axum::http::StatusCode::UNAUTHORIZED, "Invalid token").into_response();
     }
 
     // 3. Upgrade to WebSocket
@@ -155,10 +151,7 @@ fn control_event_to_json(event: &ControlEvent) -> Option<String> {
                 "session_id": session_id,
             })
         }
-        ControlEvent::AgentStatusChanged {
-            session_id,
-            status,
-        } => {
+        ControlEvent::AgentStatusChanged { session_id, status } => {
             let status_str = match status {
                 rtb_core::events::AgentStatus::Initializing => "initializing",
                 rtb_core::events::AgentStatus::Ready => "ready",

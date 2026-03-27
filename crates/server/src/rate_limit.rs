@@ -120,10 +120,10 @@ impl RateLimiter {
     /// Create a new `RateLimiter` with the default quotas from the spec.
     pub fn new() -> Self {
         Self {
-            auth: CategoryLimiter::new(600),   // 600 req/min (relaxed for dev)
-            ws: CategoryLimiter::new(600),     // 600 req/min (relaxed for dev)
-            get: CategoryLimiter::new(6000),   // 6000 req/min
-            post: CategoryLimiter::new(6000),  // 6000 req/min
+            auth: CategoryLimiter::new(600),  // 600 req/min (relaxed for dev)
+            ws: CategoryLimiter::new(600),    // 600 req/min (relaxed for dev)
+            get: CategoryLimiter::new(6000),  // 6000 req/min
+            post: CategoryLimiter::new(6000), // 6000 req/min
         }
     }
 

@@ -59,11 +59,7 @@ pub async fn ws_agent(
     // 2. Lookup session in AgentManager
     let session_id = params.session.clone();
     if !state.core.agent_manager.has_agent(&session_id) {
-        return (
-            axum::http::StatusCode::NOT_FOUND,
-            "Agent session not found",
-        )
-            .into_response();
+        return (axum::http::StatusCode::NOT_FOUND, "Agent session not found").into_response();
     }
 
     let last_seq = params.last_seq;
@@ -109,7 +105,11 @@ async fn handle_agent(
             let seq = (i + 1) as u64;
             let data_event = agent_event_to_data_event(seq, event);
             let msg = data_event_to_json(&data_event);
-            if ws_tx.send(Message::Text(msg.to_string().into())).await.is_err() {
+            if ws_tx
+                .send(Message::Text(msg.to_string().into()))
+                .await
+                .is_err()
+            {
                 warn!(session_id = %session_id, "failed to send replay event, closing");
                 return;
             }
@@ -317,7 +317,11 @@ async fn handle_agent(
 /// Used both for live events and history replay.
 fn data_event_to_json(event: &DataEvent) -> serde_json::Value {
     match event {
-        DataEvent::AgentText { seq, content, streaming } => serde_json::json!({
+        DataEvent::AgentText {
+            seq,
+            content,
+            streaming,
+        } => serde_json::json!({
             "type": "text",
             "seq": seq,
             "content": content,
@@ -328,14 +332,24 @@ fn data_event_to_json(event: &DataEvent) -> serde_json::Value {
             "seq": seq,
             "content": content,
         }),
-        DataEvent::AgentToolUse { seq, id, name, input } => serde_json::json!({
+        DataEvent::AgentToolUse {
+            seq,
+            id,
+            name,
+            input,
+        } => serde_json::json!({
             "type": "tool_use",
             "seq": seq,
             "id": id,
             "name": name,
             "input": input,
         }),
-        DataEvent::AgentToolResult { seq, id, output, is_error } => serde_json::json!({
+        DataEvent::AgentToolResult {
+            seq,
+            id,
+            output,
+            is_error,
+        } => serde_json::json!({
             "type": "tool_result",
             "seq": seq,
             "id": id,
@@ -352,7 +366,12 @@ fn data_event_to_json(event: &DataEvent) -> serde_json::Value {
             "seq": seq,
             "cost_usd": cost_usd,
         }),
-        DataEvent::AgentError { seq, message, severity, guidance } => {
+        DataEvent::AgentError {
+            seq,
+            message,
+            severity,
+            guidance,
+        } => {
             let severity_str = match severity {
                 rtb_core::events::ErrorClass::Transient => "transient",
                 rtb_core::events::ErrorClass::Permanent => "permanent",

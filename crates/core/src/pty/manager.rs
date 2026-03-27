@@ -57,20 +57,17 @@ impl PtyManager {
         let id_length = self.config.session.session_id_length;
         let session_id = nanoid::nanoid!(id_length);
 
-        let session = PtySession::spawn(
-            session_id.clone(),
-            name.to_string(),
-            cwd,
-        )?;
+        let session = PtySession::spawn(session_id.clone(), name.to_string(), cwd)?;
 
         self.sessions.insert(session_id.clone(), session);
 
         info!(session_id = %session_id, name = %name, "created PTY session");
 
-        self.event_bus.publish_control(ControlEvent::SessionCreated {
-            session_id: session_id.clone(),
-            session_type: SessionType::Terminal,
-        });
+        self.event_bus
+            .publish_control(ControlEvent::SessionCreated {
+                session_id: session_id.clone(),
+                session_type: SessionType::Terminal,
+            });
 
         // Spawn a notification detector task for this session
         self.start_detector_task(&session_id);
@@ -98,9 +95,8 @@ impl PtyManager {
 
         tokio::spawn(async move {
             let mut detector = Detector::new(None, silence_threshold, long_running_threshold);
-            let mut periodic_interval = tokio::time::interval(
-                tokio::time::Duration::from_secs(silence_threshold),
-            );
+            let mut periodic_interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(silence_threshold));
             // Skip the first immediate tick
             periodic_interval.tick().await;
 
@@ -211,9 +207,10 @@ impl PtyManager {
 
         info!(session_id = %id, "killed PTY session");
 
-        self.event_bus.publish_control(ControlEvent::SessionDeleted {
-            session_id: id.to_string(),
-        });
+        self.event_bus
+            .publish_control(ControlEvent::SessionDeleted {
+                session_id: id.to_string(),
+            });
 
         self.event_bus.remove_session(id);
 

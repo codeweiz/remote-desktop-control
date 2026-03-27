@@ -15,19 +15,52 @@ pub fn classify_error(stderr: &str, error_msg: &str) -> (ErrorClass, String) {
         || combined.contains("eacces")
         || combined.contains("permission denied")
     {
-        (ErrorClass::Permanent, "Agent binary not available or permission denied. Check installation.".into())
-    } else if combined.contains("enoent") || combined.contains("not found") || combined.contains("no such file") {
-        (ErrorClass::Permanent, "Agent command not found. Ensure it is installed and in PATH.".into())
-    } else if combined.contains("syntax") || combined.contains("invalid option") || combined.contains("unrecognized") {
-        (ErrorClass::Permanent, "Configuration error. Check agent settings and command-line flags.".into())
-    } else if combined.contains("timeout") || combined.contains("econnrefused") || combined.contains("timed out") {
-        (ErrorClass::Transient, "Network timeout. Will retry automatically.".into())
-    } else if combined.contains("rate limit") || combined.contains("429") || combined.contains("too many requests") {
-        (ErrorClass::Transient, "Rate limited. Will retry after backoff.".into())
+        (
+            ErrorClass::Permanent,
+            "Agent binary not available or permission denied. Check installation.".into(),
+        )
+    } else if combined.contains("enoent")
+        || combined.contains("not found")
+        || combined.contains("no such file")
+    {
+        (
+            ErrorClass::Permanent,
+            "Agent command not found. Ensure it is installed and in PATH.".into(),
+        )
+    } else if combined.contains("syntax")
+        || combined.contains("invalid option")
+        || combined.contains("unrecognized")
+    {
+        (
+            ErrorClass::Permanent,
+            "Configuration error. Check agent settings and command-line flags.".into(),
+        )
+    } else if combined.contains("timeout")
+        || combined.contains("econnrefused")
+        || combined.contains("timed out")
+    {
+        (
+            ErrorClass::Transient,
+            "Network timeout. Will retry automatically.".into(),
+        )
+    } else if combined.contains("rate limit")
+        || combined.contains("429")
+        || combined.contains("too many requests")
+    {
+        (
+            ErrorClass::Transient,
+            "Rate limited. Will retry after backoff.".into(),
+        )
     } else if combined.contains("killed") || combined.contains("signal") {
-        (ErrorClass::Transient, "Process was killed. Will attempt restart.".into())
+        (
+            ErrorClass::Transient,
+            "Process was killed. Will attempt restart.".into(),
+        )
     } else {
-        (ErrorClass::Transient, "Unknown error. Will attempt restart.".into())
+        (
+            ErrorClass::Transient,
+            "Unknown error. Will attempt restart.".into(),
+        )
     }
 }
 

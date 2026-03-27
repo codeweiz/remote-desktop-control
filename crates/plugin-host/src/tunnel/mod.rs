@@ -94,9 +94,7 @@ impl TunnelBridge {
                 event_bus.publish_control(ControlEvent::TunnelDown { reason });
             }
             TunnelStatus::Error => {
-                let reason = status
-                    .reason
-                    .unwrap_or_else(|| "tunnel error".to_string());
+                let reason = status.reason.unwrap_or_else(|| "tunnel error".to_string());
                 warn!(reason = %reason, "tunnel error");
                 event_bus.publish_control(ControlEvent::TunnelDown { reason });
             }

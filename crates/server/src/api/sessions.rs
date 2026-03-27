@@ -134,11 +134,10 @@ pub async fn create_session(
         "agent" => {
             let provider = body.provider.as_deref().unwrap_or("claude-code");
             let model = body.model.as_deref().unwrap_or("");
-            let cwd = body
-                .cwd
-                .as_ref()
-                .map(PathBuf::from)
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
+            let cwd =
+                body.cwd.as_ref().map(PathBuf::from).unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
+                });
             let session_id = nanoid::nanoid!(10);
 
             // Always return the session ID so the frontend can show it.
@@ -191,7 +190,11 @@ pub async fn create_session(
             {
                 Ok(id) => (
                     StatusCode::CREATED,
-                    Json(CreateSessionResponse { id, status: None, error: None }),
+                    Json(CreateSessionResponse {
+                        id,
+                        status: None,
+                        error: None,
+                    }),
                 )
                     .into_response(),
                 Err(e) => (
@@ -239,11 +242,7 @@ pub async fn delete_session(
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("not found") {
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(ErrorBody { error: msg }),
-                )
-                    .into_response()
+                (StatusCode::NOT_FOUND, Json(ErrorBody { error: msg })).into_response()
             } else {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -275,12 +274,12 @@ pub async fn send_session_input(
     Path(id): Path<String>,
     Json(body): Json<SessionInputRequest>,
 ) -> impl IntoResponse {
-    match state.core.pty_manager.write_input(&id, body.data.as_bytes()) {
-        Ok(()) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "status": "ok" })),
-        )
-            .into_response(),
+    match state
+        .core
+        .pty_manager
+        .write_input(&id, body.data.as_bytes())
+    {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response(),
         Err(e) => {
             let msg = e.to_string();
             let status = if msg.contains("not found") {
@@ -288,11 +287,7 @@ pub async fn send_session_input(
             } else {
                 StatusCode::INTERNAL_SERVER_ERROR
             };
-            (
-                status,
-                Json(ErrorBody { error: msg }),
-            )
-                .into_response()
+            (status, Json(ErrorBody { error: msg })).into_response()
         }
     }
 }

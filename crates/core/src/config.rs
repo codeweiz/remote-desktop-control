@@ -297,8 +297,7 @@ impl Config {
         // Create parent directory with 0700 permissions if needed
         if let Some(parent) = path.parent() {
             if !parent.exists() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| ConfigError::Io(e.to_string()))?;
+                std::fs::create_dir_all(parent).map_err(|e| ConfigError::Io(e.to_string()))?;
 
                 #[cfg(unix)]
                 {
@@ -310,8 +309,8 @@ impl Config {
             }
         }
 
-        let content = toml::to_string_pretty(self)
-            .map_err(|e| ConfigError::Serialize(e.to_string()))?;
+        let content =
+            toml::to_string_pretty(self).map_err(|e| ConfigError::Serialize(e.to_string()))?;
         std::fs::write(path, content).map_err(|e| ConfigError::Io(e.to_string()))?;
         Ok(())
     }
@@ -346,8 +345,8 @@ impl Config {
             return Ok(());
         }
 
-        let content = std::fs::read_to_string(&json_path)
-            .map_err(|e| ConfigError::Io(e.to_string()))?;
+        let content =
+            std::fs::read_to_string(&json_path).map_err(|e| ConfigError::Io(e.to_string()))?;
 
         let v1: serde_json::Value = serde_json::from_str(&content)
             .map_err(|e| ConfigError::Parse(format!("v1 config.json parse error: {}", e)))?;
@@ -382,22 +381,19 @@ impl Config {
         }
 
         // Write the new config.toml
-        let toml_content = toml::to_string_pretty(&config)
-            .map_err(|e| ConfigError::Serialize(e.to_string()))?;
+        let toml_content =
+            toml::to_string_pretty(&config).map_err(|e| ConfigError::Serialize(e.to_string()))?;
 
         // Ensure the directory exists
         if let Some(parent) = toml_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| ConfigError::Io(e.to_string()))?;
+            std::fs::create_dir_all(parent).map_err(|e| ConfigError::Io(e.to_string()))?;
         }
 
-        std::fs::write(&toml_path, toml_content)
-            .map_err(|e| ConfigError::Io(e.to_string()))?;
+        std::fs::write(&toml_path, toml_content).map_err(|e| ConfigError::Io(e.to_string()))?;
 
         // Rename config.json to config.json.v1.bak
         let backup_path = rtb_dir.join("config.json.v1.bak");
-        std::fs::rename(&json_path, &backup_path)
-            .map_err(|e| ConfigError::Io(e.to_string()))?;
+        std::fs::rename(&json_path, &backup_path).map_err(|e| ConfigError::Io(e.to_string()))?;
 
         // Print migration summary
         eprintln!("Migrated v1 config.json -> config.toml");

@@ -63,7 +63,12 @@ pub struct PluginManager {
 
 impl PluginManager {
     /// Create a new plugin manager.
-    pub fn new(plugins_dir: PathBuf, core: Arc<CoreState>, timeout_secs: u64, server_port: u16) -> Self {
+    pub fn new(
+        plugins_dir: PathBuf,
+        core: Arc<CoreState>,
+        timeout_secs: u64,
+        server_port: u16,
+    ) -> Self {
         Self {
             plugins_dir,
             plugins: Arc::new(RwLock::new(HashMap::new())),
@@ -129,8 +134,8 @@ impl PluginManager {
     /// Parse a plugin.toml manifest file.
     async fn parse_manifest(path: &Path) -> Result<PluginManifest, PluginManagerError> {
         let content = tokio::fs::read_to_string(path).await?;
-        let manifest: PluginManifest =
-            toml::from_str(&content).map_err(|e| PluginManagerError::ManifestParse(e.to_string()))?;
+        let manifest: PluginManifest = toml::from_str(&content)
+            .map_err(|e| PluginManagerError::ManifestParse(e.to_string()))?;
         Ok(manifest)
     }
 
@@ -166,10 +171,7 @@ impl PluginManager {
     }
 
     /// Start a single plugin from its manifest.
-    pub async fn start_plugin(
-        &self,
-        manifest: PluginManifest,
-    ) -> Result<(), PluginManagerError> {
+    pub async fn start_plugin(&self, manifest: PluginManifest) -> Result<(), PluginManagerError> {
         let plugin_id = manifest.plugin.id.clone();
         let plugin_name = manifest.plugin.name.clone();
         let plugin_config = manifest.config.clone();
@@ -231,13 +233,16 @@ impl PluginManager {
             }),
         };
 
-        match process.call(
-            match plugin_type {
-                PluginType::Im => crate::types::im_methods::INITIALIZE,
-                PluginType::Tunnel => crate::types::tunnel_methods::INITIALIZE,
-            },
-            Some(init_params),
-        ).await {
+        match process
+            .call(
+                match plugin_type {
+                    PluginType::Im => crate::types::im_methods::INITIALIZE,
+                    PluginType::Tunnel => crate::types::tunnel_methods::INITIALIZE,
+                },
+                Some(init_params),
+            )
+            .await
+        {
             Ok(resp) => {
                 if resp.is_error() {
                     let err = resp.error.unwrap();
@@ -250,7 +255,8 @@ impl PluginManager {
                     return Err(PluginProcessError::RpcError {
                         code: err.code,
                         message: err.message,
-                    }.into());
+                    }
+                    .into());
                 }
                 process.state = PluginState::Ready;
                 info!(plugin_id = %plugin_id, "plugin initialized successfully");
@@ -267,10 +273,10 @@ impl PluginManager {
                 "config": {},
                 "local_port": self.server_port
             });
-            match process.call(
-                crate::types::tunnel_methods::START,
-                Some(start_params),
-            ).await {
+            match process
+                .call(crate::types::tunnel_methods::START, Some(start_params))
+                .await
+            {
                 Ok(resp) => {
                     if resp.is_error() {
                         let err = resp.error.unwrap();
@@ -286,9 +292,11 @@ impl PluginManager {
                         if let Some(ref result) = resp.result {
                             if let Some(url) = result.get("url").and_then(|v| v.as_str()) {
                                 info!(url = %url, "tunnel URL available");
-                                self.core.event_bus.publish_control(ControlEvent::TunnelReady {
-                                    url: url.to_string(),
-                                });
+                                self.core
+                                    .event_bus
+                                    .publish_control(ControlEvent::TunnelReady {
+                                        url: url.to_string(),
+                                    });
                             }
                         }
                     }
@@ -308,37 +316,41 @@ impl PluginManager {
             // Create a sender closure that calls the plugin's send_message method
             let plugins_ref = Arc::clone(&self.plugins);
             let pid = plugin_id.clone();
-            let sender: crate::im::ImPluginSender = Arc::new(move |text: String, channel: Option<String>| {
-                let plugins_ref = Arc::clone(&plugins_ref);
-                let pid = pid.clone();
-                Box::pin(async move {
-                    let plugins = plugins_ref.read().await;
-                    if let Some(managed) = plugins.get(&pid) {
-                        let params = serde_json::json!({
-                            "text": text,
-                            "channel": channel,
-                        });
-                        if let Err(e) = managed.process.call(
-                            crate::types::im_methods::SEND_MESSAGE,
-                            Some(params),
-                        ).await {
-                            warn!(
-                                plugin_id = %pid,
-                                error = %e,
-                                "failed to send message via IM plugin"
-                            );
+            let sender: crate::im::ImPluginSender =
+                Arc::new(move |text: String, channel: Option<String>| {
+                    let plugins_ref = Arc::clone(&plugins_ref);
+                    let pid = pid.clone();
+                    Box::pin(async move {
+                        let plugins = plugins_ref.read().await;
+                        if let Some(managed) = plugins.get(&pid) {
+                            let params = serde_json::json!({
+                                "text": text,
+                                "channel": channel,
+                            });
+                            if let Err(e) = managed
+                                .process
+                                .call(crate::types::im_methods::SEND_MESSAGE, Some(params))
+                                .await
+                            {
+                                warn!(
+                                    plugin_id = %pid,
+                                    error = %e,
+                                    "failed to send message via IM plugin"
+                                );
+                            }
                         }
-                    }
-                })
-            });
+                    })
+                });
             bridge.set_plugin_sender(sender).await;
         }
 
         // Publish PluginLoaded event
-        self.core.event_bus.publish_control(ControlEvent::PluginLoaded {
-            plugin_id: plugin_id.clone(),
-            name: plugin_name,
-        });
+        self.core
+            .event_bus
+            .publish_control(ControlEvent::PluginLoaded {
+                plugin_id: plugin_id.clone(),
+                name: plugin_name,
+            });
 
         let managed = ManagedPlugin {
             process,
@@ -393,17 +405,17 @@ impl PluginManager {
                 managed.restart_count += 1;
 
                 if managed.restart_count > MAX_RESTART_ATTEMPTS {
-                    let reason = format!(
-                        "exceeded max restart attempts ({MAX_RESTART_ATTEMPTS})"
-                    );
+                    let reason = format!("exceeded max restart attempts ({MAX_RESTART_ATTEMPTS})");
                     managed.process.state = PluginState::Disabled {
                         reason: reason.clone(),
                     };
                     error!(plugin_id = %id, reason = %reason, "plugin disabled");
-                    self.core.event_bus.publish_control(ControlEvent::PluginError {
-                        plugin_id: id.clone(),
-                        error: reason,
-                    });
+                    self.core
+                        .event_bus
+                        .publish_control(ControlEvent::PluginError {
+                            plugin_id: id.clone(),
+                            error: reason,
+                        });
                     continue;
                 }
 

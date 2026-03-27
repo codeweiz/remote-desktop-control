@@ -127,10 +127,17 @@ impl NotificationRouter {
                         session_id: sid.clone(),
                         status: AgentStatus::Idle,
                     });
-                ("agent_completed".to_string(), "Agent task completed".to_string(), false)
+                (
+                    "agent_completed".to_string(),
+                    "Agent task completed".to_string(),
+                    false,
+                )
             }
 
-            NotifyTrigger::AgentNeedsApproval { session_id: sid, tool } => {
+            NotifyTrigger::AgentNeedsApproval {
+                session_id: sid,
+                tool,
+            } => {
                 info!(
                     session_id = %sid,
                     tool = %tool,
@@ -141,22 +148,32 @@ impl NotificationRouter {
                         session_id: sid.clone(),
                         status: AgentStatus::WaitingApproval,
                     });
-                ("agent_needs_approval".to_string(), format!("Agent needs approval for tool: {tool}"), true)
+                (
+                    "agent_needs_approval".to_string(),
+                    format!("Agent needs approval for tool: {tool}"),
+                    true,
+                )
             }
 
-            NotifyTrigger::AgentError { session_id: sid, error } => {
+            NotifyTrigger::AgentError {
+                session_id: sid,
+                error,
+            } => {
                 info!(
                     session_id = %sid,
                     error = %error,
                     "routing AgentError notification"
                 );
-                self.event_bus
-                    .publish_control(ControlEvent::AgentError {
-                        session_id: sid.clone(),
-                        error: error.clone(),
-                        class: ErrorClass::Transient,
-                    });
-                ("agent_error".to_string(), format!("Agent error: {error}"), true)
+                self.event_bus.publish_control(ControlEvent::AgentError {
+                    session_id: sid.clone(),
+                    error: error.clone(),
+                    class: ErrorClass::Transient,
+                });
+                (
+                    "agent_error".to_string(),
+                    format!("Agent error: {error}"),
+                    true,
+                )
             }
         };
 

@@ -136,7 +136,11 @@ max_message_size_bytes = 2097152
     assert_eq!(cfg.plugins.max_message_size_bytes, 2_097_152);
 
     // Check notification rules
-    let rule = cfg.notification.rules.get("task_complete").expect("rule should exist");
+    let rule = cfg
+        .notification
+        .rules
+        .get("task_complete")
+        .expect("rule should exist");
     assert_eq!(rule.channels, vec!["web", "desktop"]);
     assert_eq!(rule.min_duration.as_deref(), Some("5m"));
     assert_eq!(rule.urgent, Some(true));
@@ -250,8 +254,7 @@ fn test_save_and_load_roundtrip() {
     cfg.save_to_path(path.to_str().unwrap())
         .expect("should save config");
 
-    let loaded = Config::load_from_path(path.to_str().unwrap())
-        .expect("should load config");
+    let loaded = Config::load_from_path(path.to_str().unwrap()).expect("should load config");
 
     assert_eq!(loaded.server.port, 4242);
     assert_eq!(loaded.agent.default_model, "test-model");
@@ -267,7 +270,8 @@ fn test_corrupt_file_returns_error() {
 
     // Write garbage that's not valid TOML
     let mut f = std::fs::File::create(&path).expect("create file");
-    f.write_all(b"this is not [valid toml\n{{{}}}").expect("write");
+    f.write_all(b"this is not [valid toml\n{{{}}}")
+        .expect("write");
     drop(f);
 
     let result = Config::load_from_path(path.to_str().unwrap());

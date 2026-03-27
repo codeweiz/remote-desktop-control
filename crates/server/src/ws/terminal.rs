@@ -44,22 +44,14 @@ pub async fn ws_terminal(
     // 1. Validate token
     let expected = state.token.read().await.clone();
     if params.token != expected {
-        return (
-            axum::http::StatusCode::UNAUTHORIZED,
-            "Invalid token",
-        )
-            .into_response();
+        return (axum::http::StatusCode::UNAUTHORIZED, "Invalid token").into_response();
     }
 
     // 2. Lookup session in PtyManager
     let session_id = params.session.clone();
     let session = state.core.pty_manager.get_session(&session_id);
     if session.is_none() {
-        return (
-            axum::http::StatusCode::NOT_FOUND,
-            "Session not found",
-        )
-            .into_response();
+        return (axum::http::StatusCode::NOT_FOUND, "Session not found").into_response();
     }
 
     // 3. Upgrade to WebSocket
@@ -74,11 +66,7 @@ pub async fn ws_terminal(
 /// - JSON text frames are parsed as commands (resize, keepalive).
 /// - Monitors session status for exit notification.
 /// - Closes on lag so the client can reconnect cleanly.
-async fn handle_terminal(
-    socket: WebSocket,
-    state: AppState,
-    session_id: String,
-) {
+async fn handle_terminal(socket: WebSocket, state: AppState, session_id: String) {
     info!(session_id = %session_id, "terminal WebSocket connected");
 
     let (mut ws_tx, mut ws_rx) = socket.split();
@@ -169,7 +157,7 @@ async fn handle_terminal(
                     Ok(data) => {
                         match tokio::time::timeout(
                             Duration::from_millis(100),
-                            ws_tx.send(Message::Binary(data.into()))
+                            ws_tx.send(Message::Binary(data))
                         ).await {
                             Ok(Ok(())) => {}
                             _ => {

@@ -111,10 +111,11 @@ impl AgentManager {
                 self.agents.insert(session_id.clone(), managed);
 
                 // Publish session creation event
-                self.event_bus.publish_control(ControlEvent::AgentStatusChanged {
-                    session_id,
-                    status: AgentStatus::Ready,
-                });
+                self.event_bus
+                    .publish_control(ControlEvent::AgentStatusChanged {
+                        session_id,
+                        status: AgentStatus::Ready,
+                    });
 
                 Ok(())
             }
@@ -138,13 +139,14 @@ impl AgentManager {
 
                 self.agents.insert(session_id.clone(), managed);
 
-                self.event_bus.publish_control(ControlEvent::AgentStatusChanged {
-                    session_id: session_id.clone(),
-                    status: AgentStatus::Crashed {
-                        error: e.clone(),
-                        class: ErrorClass::Permanent,
-                    },
-                });
+                self.event_bus
+                    .publish_control(ControlEvent::AgentStatusChanged {
+                        session_id: session_id.clone(),
+                        status: AgentStatus::Crashed {
+                            error: e.clone(),
+                            class: ErrorClass::Permanent,
+                        },
+                    });
 
                 Err(e)
             }
@@ -154,11 +156,7 @@ impl AgentManager {
     /// Send a message to an agent (fire-and-forget).
     ///
     /// The caller uses the event stream to detect when the turn finishes.
-    pub async fn send_message(
-        &self,
-        session_id: &str,
-        text: String,
-    ) -> Result<(), String> {
+    pub async fn send_message(&self, session_id: &str, text: String) -> Result<(), String> {
         self.send_message_from(session_id, text, "web").await
     }
 
@@ -178,14 +176,16 @@ impl AgentManager {
             .ok_or_else(|| "Agent not running".to_string())?;
 
         // Publish user message event so all frontends can see it
-        self.event_bus.publish_data(
-            session_id,
-            crate::events::DataEvent::AgentUserMessage {
-                seq: 0,
-                text: text.clone(),
-                source: source.to_string(),
-            },
-        ).await;
+        self.event_bus
+            .publish_data(
+                session_id,
+                crate::events::DataEvent::AgentUserMessage {
+                    seq: 0,
+                    text: text.clone(),
+                    source: source.to_string(),
+                },
+            )
+            .await;
 
         agent.backend.send_message_fire(&text).await
     }
@@ -220,8 +220,14 @@ impl AgentManager {
     }
 
     /// Set the companion terminal for an agent.
-    pub fn set_companion_terminal(&self, agent_session_id: &str, terminal_id: &str) -> Result<(), String> {
-        let mut entry = self.agents.get_mut(agent_session_id)
+    pub fn set_companion_terminal(
+        &self,
+        agent_session_id: &str,
+        terminal_id: &str,
+    ) -> Result<(), String> {
+        let mut entry = self
+            .agents
+            .get_mut(agent_session_id)
             .ok_or_else(|| format!("agent not found: {}", agent_session_id))?;
         entry.companion_terminal_id = Some(terminal_id.to_string());
         Ok(())
@@ -229,13 +235,15 @@ impl AgentManager {
 
     /// Get the companion terminal ID for an agent.
     pub fn get_companion_terminal(&self, agent_session_id: &str) -> Option<String> {
-        self.agents.get(agent_session_id)
+        self.agents
+            .get(agent_session_id)
             .and_then(|entry| entry.companion_terminal_id.clone())
     }
 
     /// Find agents that have this terminal as companion.
     pub fn find_agents_for_terminal(&self, terminal_id: &str) -> Vec<String> {
-        self.agents.iter()
+        self.agents
+            .iter()
             .filter(|entry| entry.companion_terminal_id.as_deref() == Some(terminal_id))
             .map(|entry| entry.key().clone())
             .collect()

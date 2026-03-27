@@ -16,7 +16,7 @@ use rtb_core::events::{ControlEvent, DataEvent, SessionType};
 use rtb_core::CoreState;
 
 use crate::protocol::JsonRpcNotification;
-use crate::types::{im_methods, ImOnMessageParams, ImOnStatusParams, ImConnectionStatus};
+use crate::types::{im_methods, ImConnectionStatus, ImOnMessageParams, ImOnStatusParams};
 
 /// Default throttle interval for batching outgoing messages (5 seconds).
 const DEFAULT_THROTTLE_MS: u64 = 5000;
@@ -35,7 +35,7 @@ fn strip_ansi(input: &str) -> String {
             // Check for CSI sequence (ESC [)
             if chars.peek() == Some(&'[') {
                 chars.next(); // consume '['
-                // Skip until we hit a letter (final byte of CSI: 0x40-0x7E)
+                              // Skip until we hit a letter (final byte of CSI: 0x40-0x7E)
                 loop {
                     match chars.next() {
                         Some(fc) if fc.is_ascii() && (0x40..=0x7E).contains(&(fc as u8)) => break,
@@ -133,7 +133,14 @@ impl ImCommand {
 
 /// Sender handle for writing messages to the IM plugin's `send_message` method.
 /// This is an async callback that the PluginManager provides after starting the plugin.
-pub type ImPluginSender = Arc<dyn Fn(String, Option<String>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
+pub type ImPluginSender = Arc<
+    dyn Fn(
+            String,
+            Option<String>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// Outgoing message with optional channel routing.
 struct OutgoingMessage {
@@ -241,11 +248,9 @@ impl ImBridge {
                                             core.event_bus.publish_control(
                                                 ControlEvent::PluginError {
                                                     plugin_id: "im".to_string(),
-                                                    error: status
-                                                        .message
-                                                        .unwrap_or_else(|| {
-                                                            format!("{:?}", status.status)
-                                                        }),
+                                                    error: status.message.unwrap_or_else(|| {
+                                                        format!("{:?}", status.status)
+                                                    }),
                                                 },
                                             );
                                         }
@@ -278,8 +283,7 @@ impl ImBridge {
             ImCommand::NewAgent { provider } => {
                 let session_id = nanoid::nanoid!(10);
                 let name = format!("IM-Agent-{}", &session_id[..4]);
-                let cwd = std::env::current_dir()
-                    .unwrap_or_else(|_| std::path::PathBuf::from("/"));
+                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
 
                 let reply = match core
                     .agent_manager
@@ -324,8 +328,11 @@ impl ImBridge {
                 } else {
                     let mut lines = vec!["Agents:".to_string()];
                     for (i, (sid, name, status, _created)) in agents.iter().enumerate() {
-                        let current =
-                            if Some(sid) == current_session.as_ref() { " <-" } else { "" };
+                        let current = if Some(sid) == current_session.as_ref() {
+                            " <-"
+                        } else {
+                            ""
+                        };
                         lines.push(format!("  #{} {} [{:?}]{}", i + 1, name, status, current));
                     }
                     lines.push("\nUse /switch N to switch.".to_string());
@@ -353,12 +360,7 @@ impl ImBridge {
                             .await
                             .insert(ch.clone(), sid.clone());
                         // Start monitoring the switched-to agent's output
-                        Self::spawn_channel_monitor(
-                            &core.event_bus,
-                            sid,
-                            ch,
-                            outgoing_tx.clone(),
-                        );
+                        Self::spawn_channel_monitor(&core.event_bus, sid, ch, outgoing_tx.clone());
                     }
                     format!("Switched to {name}")
                 };
@@ -440,8 +442,10 @@ impl ImBridge {
                     };
 
                     // Forward message to agent (with source tracking)
-                    if let Err(e) =
-                        core.agent_manager.send_message_from(&session_id, text, "feishu").await
+                    if let Err(e) = core
+                        .agent_manager
+                        .send_message_from(&session_id, text, "feishu")
+                        .await
                     {
                         let _ = outgoing_tx
                             .send(OutgoingMessage {
@@ -536,7 +540,7 @@ impl ImBridge {
         outgoing_tx: mpsc::Sender<OutgoingMessage>,
     ) {
         let mut data_rx = event_bus.create_data_subscriber(session_id);
-        let session_id = session_id.to_string();
+        let _session_id = session_id.to_string();
         let channel_id = channel_id.to_string();
 
         tokio::spawn(async move {
@@ -544,57 +548,71 @@ impl ImBridge {
                 match data_rx.recv().await {
                     Some(DataEvent::AgentText { content, .. }) => {
                         if !content.is_empty() {
-                            let _ = outgoing_tx.send(OutgoingMessage {
-                                text: content,
-                                channel: Some(channel_id.clone()),
-                            }).await;
+                            let _ = outgoing_tx
+                                .send(OutgoingMessage {
+                                    text: content,
+                                    channel: Some(channel_id.clone()),
+                                })
+                                .await;
                         }
                     }
                     Some(DataEvent::AgentUserMessage { .. }) => {}
                     Some(DataEvent::AgentThinking { .. }) => {}
                     Some(DataEvent::AgentToolUse { name, .. }) => {
-                        let _ = outgoing_tx.send(OutgoingMessage {
-                            text: format!("\u{1f527} {name}"),
-                            channel: Some(channel_id.clone()),
-                        }).await;
+                        let _ = outgoing_tx
+                            .send(OutgoingMessage {
+                                text: format!("\u{1f527} {name}"),
+                                channel: Some(channel_id.clone()),
+                            })
+                            .await;
                     }
-                    Some(DataEvent::AgentToolResult { output, is_error, .. }) => {
+                    Some(DataEvent::AgentToolResult {
+                        output, is_error, ..
+                    }) => {
                         let prefix = if is_error { "Error" } else { "Result" };
                         let truncated = if output.len() > AGENT_TOOL_RESULT_MAX_LEN {
                             format!("{}...[truncated]", &output[..AGENT_TOOL_RESULT_MAX_LEN])
                         } else {
                             output
                         };
-                        let _ = outgoing_tx.send(OutgoingMessage {
-                            text: format!("{prefix}: {truncated}"),
-                            channel: Some(channel_id.clone()),
-                        }).await;
+                        let _ = outgoing_tx
+                            .send(OutgoingMessage {
+                                text: format!("{prefix}: {truncated}"),
+                                channel: Some(channel_id.clone()),
+                            })
+                            .await;
                     }
                     Some(DataEvent::AgentProgress { message, .. }) => {
-                        let _ = outgoing_tx.send(OutgoingMessage {
-                            text: format!("[progress] {message}"),
-                            channel: Some(channel_id.clone()),
-                        }).await;
+                        let _ = outgoing_tx
+                            .send(OutgoingMessage {
+                                text: format!("[progress] {message}"),
+                                channel: Some(channel_id.clone()),
+                            })
+                            .await;
                     }
                     Some(DataEvent::AgentTurnComplete { cost_usd, .. }) => {
-                        let cost_info = cost_usd
-                            .map(|c| format!(" (${c:.4})"))
-                            .unwrap_or_default();
-                        let _ = outgoing_tx.send(OutgoingMessage {
-                            text: format!("\u{2705} Done{cost_info}"),
-                            channel: Some(channel_id.clone()),
-                        }).await;
+                        let cost_info = cost_usd.map(|c| format!(" (${c:.4})")).unwrap_or_default();
+                        let _ = outgoing_tx
+                            .send(OutgoingMessage {
+                                text: format!("\u{2705} Done{cost_info}"),
+                                channel: Some(channel_id.clone()),
+                            })
+                            .await;
                     }
-                    Some(DataEvent::AgentError { message, guidance, .. }) => {
+                    Some(DataEvent::AgentError {
+                        message, guidance, ..
+                    }) => {
                         let text = if guidance.is_empty() {
                             format!("\u{274c} {message}")
                         } else {
                             format!("\u{274c} {message}\n{guidance}")
                         };
-                        let _ = outgoing_tx.send(OutgoingMessage {
-                            text,
-                            channel: Some(channel_id.clone()),
-                        }).await;
+                        let _ = outgoing_tx
+                            .send(OutgoingMessage {
+                                text,
+                                channel: Some(channel_id.clone()),
+                            })
+                            .await;
                     }
                     Some(DataEvent::PtyOutput { .. }) | Some(DataEvent::PtyExited { .. }) => {}
                     None => return,
@@ -618,10 +636,12 @@ impl ImBridge {
                 match data_rx.recv().await {
                     Some(DataEvent::AgentText { content, .. }) => {
                         if !content.is_empty() {
-                            let _ = outgoing_tx.send(OutgoingMessage {
-                                text: format!("[agent {session_id}] {content}"),
-                                channel: None,
-                            }).await;
+                            let _ = outgoing_tx
+                                .send(OutgoingMessage {
+                                    text: format!("[agent {session_id}] {content}"),
+                                    channel: None,
+                                })
+                                .await;
                         }
                     }
                     Some(DataEvent::AgentUserMessage { .. }) => {}
@@ -629,13 +649,21 @@ impl ImBridge {
                         // Skip thinking events to reduce noise
                     }
                     Some(DataEvent::AgentToolUse { name, .. }) => {
-                        let _ = outgoing_tx.send(OutgoingMessage {
-                            text: format!("[agent {session_id}] \u{1f527} Using tool: {name}"),
-                            channel: None,
-                        }).await;
+                        let _ = outgoing_tx
+                            .send(OutgoingMessage {
+                                text: format!("[agent {session_id}] \u{1f527} Using tool: {name}"),
+                                channel: None,
+                            })
+                            .await;
                     }
-                    Some(DataEvent::AgentToolResult { output, is_error, .. }) => {
-                        let prefix = if is_error { "Tool error" } else { "Tool result" };
+                    Some(DataEvent::AgentToolResult {
+                        output, is_error, ..
+                    }) => {
+                        let prefix = if is_error {
+                            "Tool error"
+                        } else {
+                            "Tool result"
+                        };
                         let truncated = if output.len() > AGENT_TOOL_RESULT_MAX_LEN {
                             format!(
                                 "{}...\n[truncated, {} bytes total]",
@@ -645,53 +673,71 @@ impl ImBridge {
                         } else {
                             output
                         };
-                        let _ = outgoing_tx.send(OutgoingMessage {
-                            text: format!("[agent {session_id}] {prefix}: {truncated}"),
-                            channel: None,
-                        }).await;
+                        let _ = outgoing_tx
+                            .send(OutgoingMessage {
+                                text: format!("[agent {session_id}] {prefix}: {truncated}"),
+                                channel: None,
+                            })
+                            .await;
                     }
                     Some(DataEvent::AgentProgress { message, .. }) => {
-                        let _ = outgoing_tx.send(OutgoingMessage {
-                            text: format!("[agent {session_id}] [progress] {message}"),
-                            channel: None,
-                        }).await;
+                        let _ = outgoing_tx
+                            .send(OutgoingMessage {
+                                text: format!("[agent {session_id}] [progress] {message}"),
+                                channel: None,
+                            })
+                            .await;
                     }
                     Some(DataEvent::AgentTurnComplete { cost_usd, .. }) => {
                         let cost_info = cost_usd
                             .map(|c| format!(" (cost: ${c:.4})"))
                             .unwrap_or_default();
-                        let _ = outgoing_tx.send(OutgoingMessage {
-                            text: format!("[agent {session_id}] \u{2705} Turn complete{cost_info}"),
-                            channel: None,
-                        }).await;
+                        let _ = outgoing_tx
+                            .send(OutgoingMessage {
+                                text: format!(
+                                    "[agent {session_id}] \u{2705} Turn complete{cost_info}"
+                                ),
+                                channel: None,
+                            })
+                            .await;
                     }
-                    Some(DataEvent::AgentError { message, guidance, .. }) => {
+                    Some(DataEvent::AgentError {
+                        message, guidance, ..
+                    }) => {
                         let text = if guidance.is_empty() {
                             format!("[agent {session_id}] \u{274c} Error: {message}")
                         } else {
                             format!("[agent {session_id}] \u{274c} Error: {message}\nGuidance: {guidance}")
                         };
-                        let _ = outgoing_tx.send(OutgoingMessage {
-                            text,
-                            channel: None,
-                        }).await;
+                        let _ = outgoing_tx
+                            .send(OutgoingMessage {
+                                text,
+                                channel: None,
+                            })
+                            .await;
                     }
                     // PTY events from agent sessions (if any)
                     Some(DataEvent::PtyOutput { data, .. }) => {
                         let text = String::from_utf8_lossy(&data);
                         let clean = strip_ansi(&text);
                         if !clean.is_empty() {
-                            let _ = outgoing_tx.send(OutgoingMessage {
-                                text: format!("[agent {session_id}] {clean}"),
-                                channel: None,
-                            }).await;
+                            let _ = outgoing_tx
+                                .send(OutgoingMessage {
+                                    text: format!("[agent {session_id}] {clean}"),
+                                    channel: None,
+                                })
+                                .await;
                         }
                     }
                     Some(DataEvent::PtyExited { exit_code }) => {
-                        let _ = outgoing_tx.send(OutgoingMessage {
-                            text: format!("[agent {session_id}] PTY exited with code {exit_code}"),
-                            channel: None,
-                        }).await;
+                        let _ = outgoing_tx
+                            .send(OutgoingMessage {
+                                text: format!(
+                                    "[agent {session_id}] PTY exited with code {exit_code}"
+                                ),
+                                channel: None,
+                            })
+                            .await;
                         return;
                     }
                     None => return, // channel closed
@@ -829,7 +875,11 @@ impl ImBridge {
                     let text = std::mem::take(&mut pty_buffer);
                     // Truncate very long output
                     let text = if text.len() > 4000 {
-                        format!("{}...\n[truncated, {} bytes total]", &text[..4000], text.len())
+                        format!(
+                            "{}...\n[truncated, {} bytes total]",
+                            &text[..4000],
+                            text.len()
+                        )
                     } else {
                         text
                     };

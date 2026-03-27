@@ -203,8 +203,7 @@ pub async fn start(cli: &Cli) -> anyhow::Result<()> {
     tokio::spawn({
         let blocklist = blocklist.clone();
         async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(5 * 60));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5 * 60));
             loop {
                 interval.tick().await;
                 blocklist.cleanup_expired();

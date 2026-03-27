@@ -233,10 +233,7 @@ impl CloudflaredManager {
     /// Check if the child process is still running.
     fn is_running(&mut self) -> bool {
         if let Some(child) = &mut self.child {
-            match child.try_wait() {
-                Ok(None) => true,
-                _ => false,
-            }
+            matches!(child.try_wait(), Ok(None))
         } else {
             false
         }

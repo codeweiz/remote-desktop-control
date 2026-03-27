@@ -6,7 +6,6 @@
 ///
 /// This interceptor detects queries in the PTY output stream and writes
 /// responses directly back to the PTY stdin, bypassing the network.
-
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
@@ -236,8 +235,7 @@ mod tests {
         osc.intercept(part2);
         let written = buf.lock().unwrap().clone();
         assert_eq!(
-            written,
-            b"\x1b]11;rgb:0d0d/1111/1717\x1b\\",
+            written, b"\x1b]11;rgb:0d0d/1111/1717\x1b\\",
             "should detect query across chunk boundary"
         );
     }

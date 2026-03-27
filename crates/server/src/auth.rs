@@ -73,10 +73,9 @@ pub async fn auth_middleware(
                         TOKEN_COOKIE, expected
                     );
                     let mut response = Redirect::to(&clean_uri).into_response();
-                    response.headers_mut().insert(
-                        header::SET_COOKIE,
-                        cookie_header.parse().unwrap(),
-                    );
+                    response
+                        .headers_mut()
+                        .insert(header::SET_COOKIE, cookie_header.parse().unwrap());
                     return response;
                 }
             }

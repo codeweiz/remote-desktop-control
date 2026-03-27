@@ -238,8 +238,7 @@ impl PluginProcess {
 
         // Register pending request
         let (tx, rx) = oneshot::channel();
-        self.pending
-            .insert(id.to_string(), PendingRequest { tx });
+        self.pending.insert(id.to_string(), PendingRequest { tx });
 
         // Write to stdin
         {
@@ -297,7 +296,7 @@ impl PluginProcess {
     pub fn is_running(&mut self) -> bool {
         if let Some(child) = &mut self.child {
             match child.try_wait() {
-                Ok(None) => true,  // still running
+                Ok(None) => true, // still running
                 Ok(Some(_)) => false,
                 Err(_) => false,
             }

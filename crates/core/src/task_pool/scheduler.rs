@@ -2,7 +2,7 @@
 //! and automatically dispatches pending tasks from the pool.
 //!
 //! The dispatcher periodically checks for available capacity (idle agents
-//! + concurrency limits) and assigns the highest-priority pending task
+//! and concurrency limits) and assigns the highest-priority pending task
 //! to an idle agent session. It also listens for `AgentTurnComplete`
 //! events to transition tasks to Completed or NeedsReview.
 
@@ -134,7 +134,7 @@ impl TaskDispatcher {
                     result = control_rx.recv() => {
                         match result {
                             Ok(event) => {
-                                Self::handle_control_event(&config, &pool, &*event).await;
+                                Self::handle_control_event(&config, &pool, &event).await;
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                                 warn!(skipped = n, "dispatcher lagged on control events");
@@ -201,7 +201,11 @@ impl TaskDispatcher {
             // Determine provider/model from task target or use defaults.
             let (provider, model) = match &task.target {
                 TaskTarget::Agent { provider, model } => {
-                    let p = if provider.is_empty() { "claude-code" } else { provider.as_str() };
+                    let p = if provider.is_empty() {
+                        "claude-code"
+                    } else {
+                        provider.as_str()
+                    };
                     let m = if model.is_empty() { "" } else { model.as_str() };
                     (p.to_string(), m.to_string())
                 }
@@ -226,11 +230,10 @@ impl TaskDispatcher {
 
             // Create an agent session for this task.
             let cwd = match &task.target {
-                TaskTarget::Command { cwd, .. } => {
-                    cwd.as_ref()
-                        .map(|c| PathBuf::from(c))
-                        .unwrap_or_else(|| config.default_cwd.clone())
-                }
+                TaskTarget::Command { cwd, .. } => cwd
+                    .as_ref()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| config.default_cwd.clone()),
                 _ => config.default_cwd.clone(),
             };
 
@@ -260,13 +263,18 @@ impl TaskDispatcher {
                         );
                         // Mark task as failed since agent couldn't accept prompt.
                         let _ = pool.update_status(&task.id, TaskStatus::Failed).await;
-                        let _ = pool.set_result(&task.id, TaskResult {
-                            success: false,
-                            output: None,
-                            error: Some(format!("Failed to send prompt: {}", e)),
-                            exit_code: None,
-                            duration_secs: 0.0,
-                        }).await;
+                        let _ = pool
+                            .set_result(
+                                &task.id,
+                                TaskResult {
+                                    success: false,
+                                    output: None,
+                                    error: Some(format!("Failed to send prompt: {}", e)),
+                                    exit_code: None,
+                                    duration_secs: 0.0,
+                                },
+                            )
+                            .await;
                         continue;
                     }
 
@@ -290,13 +298,18 @@ impl TaskDispatcher {
                     );
                     // Revert to failed since we couldn't spawn an agent.
                     let _ = pool.update_status(&task.id, TaskStatus::Failed).await;
-                    let _ = pool.set_result(&task.id, TaskResult {
-                        success: false,
-                        output: None,
-                        error: Some(format!("Agent creation failed: {}", e)),
-                        exit_code: None,
-                        duration_secs: 0.0,
-                    }).await;
+                    let _ = pool
+                        .set_result(
+                            &task.id,
+                            TaskResult {
+                                success: false,
+                                output: None,
+                                error: Some(format!("Agent creation failed: {}", e)),
+                                exit_code: None,
+                                duration_secs: 0.0,
+                            },
+                        )
+                        .await;
                 }
             }
         }
@@ -304,31 +317,24 @@ impl TaskDispatcher {
 
     /// Handle a control event — look for agent status changes that indicate
     /// a task's agent turn has completed (or crashed).
-    async fn handle_control_event(
-        config: &SchedulerConfig,
-        pool: &TaskPool,
-        event: &ControlEvent,
-    ) {
-        match event {
-            ControlEvent::AgentStatusChanged { session_id, status } => {
-                // Only care about task-dispatched sessions (prefixed "task-").
-                if !session_id.starts_with("task-") {
-                    return;
-                }
-
-                match status {
-                    AgentStatus::Idle => {
-                        // Agent finished its turn. Transition task based on auto_approve.
-                        Self::handle_agent_idle(config, pool, session_id).await;
-                    }
-                    AgentStatus::Crashed { error, .. } => {
-                        // Agent crashed — fail the task.
-                        Self::handle_agent_crash(pool, session_id, error).await;
-                    }
-                    _ => {}
-                }
+    async fn handle_control_event(config: &SchedulerConfig, pool: &TaskPool, event: &ControlEvent) {
+        if let ControlEvent::AgentStatusChanged { session_id, status } = event {
+            // Only care about task-dispatched sessions (prefixed "task-").
+            if !session_id.starts_with("task-") {
+                return;
             }
-            _ => {}
+
+            match status {
+                AgentStatus::Idle => {
+                    // Agent finished its turn. Transition task based on auto_approve.
+                    Self::handle_agent_idle(config, pool, session_id).await;
+                }
+                AgentStatus::Crashed { error, .. } => {
+                    // Agent crashed — fail the task.
+                    Self::handle_agent_crash(pool, session_id, error).await;
+                }
+                _ => {}
+            }
         }
     }
 
@@ -364,13 +370,18 @@ impl TaskDispatcher {
                     .signed_duration_since(started)
                     .num_seconds() as f64;
 
-                let _ = pool.set_result(&task.id, TaskResult {
-                    success: true,
-                    output: Some("Agent completed the task.".to_string()),
-                    error: None,
-                    exit_code: None,
-                    duration_secs: duration,
-                }).await;
+                let _ = pool
+                    .set_result(
+                        &task.id,
+                        TaskResult {
+                            success: true,
+                            output: Some("Agent completed the task.".to_string()),
+                            error: None,
+                            exit_code: None,
+                            duration_secs: duration,
+                        },
+                    )
+                    .await;
             }
         }
     }
@@ -395,13 +406,18 @@ impl TaskDispatcher {
                 .num_seconds() as f64;
 
             let _ = pool.update_status(&task.id, TaskStatus::Failed).await;
-            let _ = pool.set_result(&task.id, TaskResult {
-                success: false,
-                output: None,
-                error: Some(format!("Agent crashed: {}", error)),
-                exit_code: None,
-                duration_secs: duration,
-            }).await;
+            let _ = pool
+                .set_result(
+                    &task.id,
+                    TaskResult {
+                        success: false,
+                        output: None,
+                        error: Some(format!("Agent crashed: {}", error)),
+                        exit_code: None,
+                        duration_secs: duration,
+                    },
+                )
+                .await;
         }
     }
 

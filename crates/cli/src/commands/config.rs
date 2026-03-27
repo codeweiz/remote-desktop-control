@@ -13,8 +13,8 @@ pub fn handle(action: &ConfigAction) -> Result<()> {
 
 /// Print the current configuration.
 fn show_config() -> Result<()> {
-    let config_path = rtb_core::config::Config::default_path()
-        .context("could not determine config path")?;
+    let config_path =
+        rtb_core::config::Config::default_path().context("could not determine config path")?;
 
     if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)
@@ -32,8 +32,8 @@ fn show_config() -> Result<()> {
 
 /// Open the config file in the user's $EDITOR.
 fn edit_config() -> Result<()> {
-    let config_path = rtb_core::config::Config::default_path()
-        .context("could not determine config path")?;
+    let config_path =
+        rtb_core::config::Config::default_path().context("could not determine config path")?;
 
     // Create a default config if none exists
     if !config_path.exists() {
@@ -64,9 +64,7 @@ fn edit_config() -> Result<()> {
 
     // Split editor command (e.g., "code --wait" -> ["code", "--wait"])
     let parts: Vec<&str> = editor.split_whitespace().collect();
-    let (cmd, args) = parts
-        .split_first()
-        .context("empty editor command")?;
+    let (cmd, args) = parts.split_first().context("empty editor command")?;
 
     let status = std::process::Command::new(cmd)
         .args(args.iter())
@@ -84,8 +82,8 @@ fn edit_config() -> Result<()> {
 
 /// Interactive config initialization: create a default config file.
 fn init_config() -> Result<()> {
-    let config_path = rtb_core::config::Config::default_path()
-        .context("could not determine config path")?;
+    let config_path =
+        rtb_core::config::Config::default_path().context("could not determine config path")?;
 
     if config_path.exists() {
         println!("Config file already exists at {}", config_path.display());
@@ -113,8 +111,8 @@ fn init_config() -> Result<()> {
     println!();
 
     // Print the generated config
-    let content = std::fs::read_to_string(&config_path)
-        .context("failed to read generated config")?;
+    let content =
+        std::fs::read_to_string(&config_path).context("failed to read generated config")?;
     println!("{}", content);
 
     println!();

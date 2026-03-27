@@ -1,9 +1,4 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
@@ -55,12 +50,10 @@ pub async fn tunnel_status(State(state): State<AppState>) -> impl IntoResponse {
         Some(pm) => {
             // Check if any tunnel plugin is running
             let plugins = pm.list_plugins().await;
-            let tunnel_plugin = plugins
-                .iter()
-                .find(|(_id, _name, _state)| {
-                    // Look for plugins with "tunnel" in the name/id
-                    _id.contains("tunnel") || _name.to_lowercase().contains("tunnel")
-                });
+            let tunnel_plugin = plugins.iter().find(|(_id, _name, _state)| {
+                // Look for plugins with "tunnel" in the name/id
+                _id.contains("tunnel") || _name.to_lowercase().contains("tunnel")
+            });
 
             match tunnel_plugin {
                 Some((id, name, plugin_state)) => {
@@ -114,10 +107,7 @@ pub async fn start_tunnel(
                     let params = serde_json::json!({
                         "domain": body.domain,
                     });
-                    match pm
-                        .call_plugin(id, "tunnel/start", Some(params))
-                        .await
-                    {
+                    match pm.call_plugin(id, "tunnel/start", Some(params)).await {
                         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
                         Err(e) => (
                             StatusCode::INTERNAL_SERVER_ERROR,
@@ -157,24 +147,22 @@ pub async fn stop_tunnel(State(state): State<AppState>) -> impl IntoResponse {
                 .find(|(id, _name, _state)| id.contains("tunnel"));
 
             match tunnel_plugin {
-                Some((id, _name, _state)) => {
-                    match pm.call_plugin(id, "tunnel/stop", None).await {
-                        Ok(_) => (
-                            StatusCode::OK,
-                            Json(MessageBody {
-                                message: "Tunnel stopped".to_string(),
-                            }),
-                        )
-                            .into_response(),
-                        Err(e) => (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(ErrorBody {
-                                error: e.to_string(),
-                            }),
-                        )
-                            .into_response(),
-                    }
-                }
+                Some((id, _name, _state)) => match pm.call_plugin(id, "tunnel/stop", None).await {
+                    Ok(_) => (
+                        StatusCode::OK,
+                        Json(MessageBody {
+                            message: "Tunnel stopped".to_string(),
+                        }),
+                    )
+                        .into_response(),
+                    Err(e) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorBody {
+                            error: e.to_string(),
+                        }),
+                    )
+                        .into_response(),
+                },
                 None => (
                     StatusCode::NOT_FOUND,
                     Json(ErrorBody {

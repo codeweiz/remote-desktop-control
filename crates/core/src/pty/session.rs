@@ -61,9 +61,7 @@ impl PtySession {
     ) -> anyhow::Result<Arc<Self>> {
         let working_dir = cwd
             .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| {
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
-            });
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
 
         // 1. Create the detached tmux session
         tmux::new_session(&id, &working_dir)?;
@@ -183,8 +181,7 @@ impl PtySession {
                     let _ = live_tx.send(data);
                 }
                 Err(e) => {
-                    if e.kind() == std::io::ErrorKind::Other
-                        || e.raw_os_error() == Some(libc::EIO)
+                    if e.kind() == std::io::ErrorKind::Other || e.raw_os_error() == Some(libc::EIO)
                     {
                         debug!(session_id = %session_id, "PTY reader got EIO (child likely exited)");
                     } else {

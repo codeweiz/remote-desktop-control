@@ -38,10 +38,7 @@ impl PluginWatcher {
     /// Start watching the plugins directory.
     ///
     /// Returns the watcher handle. Dropping it stops watching.
-    pub fn start(
-        plugins_dir: PathBuf,
-        manager: Arc<PluginManager>,
-    ) -> Result<Self, notify::Error> {
+    pub fn start(plugins_dir: PathBuf, manager: Arc<PluginManager>) -> Result<Self, notify::Error> {
         // Ensure the directory exists
         if !plugins_dir.exists() {
             std::fs::create_dir_all(&plugins_dir).map_err(|e| {
@@ -63,8 +60,7 @@ impl PluginWatcher {
                 move |res: notify::Result<Event>| {
                     let _ = tx.send(res);
                 },
-                notify::Config::default()
-                    .with_poll_interval(Duration::from_secs(2)),
+                notify::Config::default().with_poll_interval(Duration::from_secs(2)),
             )?
         };
 
@@ -78,9 +74,7 @@ impl PluginWatcher {
             if let Ok(entries) = std::fs::read_dir(&plugins_dir_for_bridge) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_dir()
-                        && path.join("plugin.toml").exists()
-                    {
+                    if path.is_dir() && path.join("plugin.toml").exists() {
                         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                             known_plugins.insert(name.to_string());
                         }
@@ -91,11 +85,8 @@ impl PluginWatcher {
             while let Ok(event_result) = notify_rx.recv() {
                 match event_result {
                     Ok(event) => {
-                        let fs_events = classify_event(
-                            &event,
-                            &plugins_dir_for_bridge,
-                            &mut known_plugins,
-                        );
+                        let fs_events =
+                            classify_event(&event, &plugins_dir_for_bridge, &mut known_plugins);
                         for fs_event in fs_events {
                             if fs_tx.blocking_send(fs_event).is_err() {
                                 return; // receiver dropped
@@ -204,10 +195,7 @@ fn extract_plugin_id(path: &Path, plugins_dir: &Path) -> Option<String> {
 }
 
 /// Process classified file-system events with debouncing.
-async fn process_fs_events(
-    mut rx: mpsc::Receiver<PluginFsEvent>,
-    manager: Arc<PluginManager>,
-) {
+async fn process_fs_events(mut rx: mpsc::Receiver<PluginFsEvent>, manager: Arc<PluginManager>) {
     // Simple debounce: collect events over a window, then process unique ones
     let debounce = Duration::from_millis(DEBOUNCE_MS);
 
@@ -253,9 +241,9 @@ async fn process_batch(events: &[PluginFsEvent], manager: &PluginManager) {
 
     for event in events {
         let id = match event {
-            PluginFsEvent::Added(id)
-            | PluginFsEvent::Removed(id)
-            | PluginFsEvent::Modified(id) => id.clone(),
+            PluginFsEvent::Added(id) | PluginFsEvent::Removed(id) | PluginFsEvent::Modified(id) => {
+                id.clone()
+            }
         };
         actions.insert(id, event);
     }
