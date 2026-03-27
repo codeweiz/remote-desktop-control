@@ -750,7 +750,7 @@ async fn run_ws_message_listener(
     info!("feishu: starting WebSocket long connection listener");
 
     let mut config = WsClientConfig::default();
-    let mut attempt = 0u32;
+    let mut attempt: u32;
 
     loop {
         let (ws_url, new_config) = match fetch_ws_endpoint(&http, &app_id, &app_secret).await {
